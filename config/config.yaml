@@ -23,7 +23,9 @@ train:
   seed: 42
 
 data:
-  primary: "teleantifraud-28k"
+  # Primary train/val/test = combined English phone-call corpus (--dataset calls).
+  # TeleAntiFraud-28k was dropped: Chinese + gated. See src/data/load.py CALL_SOURCES.
+  primary: "english-call-corpus"
   prototype: "bothbosu/scam-dialogue"
   crossdomain_eval: "redasers/difraud"
   test_size: 0.15

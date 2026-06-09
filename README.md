@@ -24,9 +24,11 @@ Gradio demo  +  metrics/logging
 
 | Dataset | Role | Notes |
 |---|---|---|
-| [TeleAntiFraud-28k](https://arxiv.org/html/2503.24115v2) | Primary train/test | 28.5k audio+text, ~48% fraud (balanced) |
-| [BothBosu/scam-dialogue](https://huggingface.co/datasets/BothBosu/scam-dialogue) | Text transcripts | Quick prototyping, more scam types |
-| [redasers/difraud](https://huggingface.co/datasets/redasers/difraud) | Cross-domain eval | 95k samples, 7 fraud domains — generalization check |
+| **English call corpus** (`--dataset calls`) | Primary train/val/test | ~9k phone-call transcripts unioned from [menaattia](https://huggingface.co/datasets/menaattia/phone-scam-dataset), [shakeleoatmeal](https://huggingface.co/datasets/shakeleoatmeal/phone-scam-detection-synthetic), [BothBosu multi-agent](https://huggingface.co/datasets/BothBosu/multi-agent-scam-conversation) + [single-agent](https://huggingface.co/datasets/BothBosu/single-agent-scam-conversations); ~50% fraud |
+| [BothBosu/scam-dialogue](https://huggingface.co/datasets/BothBosu/scam-dialogue) | Prototype | Original pipeline scaffold, more scam types |
+| [redasers/difraud](https://huggingface.co/datasets/redasers/difraud) | Cross-domain eval | 95k samples, 7 fraud domains — out-of-distribution check (never trained on) |
+
+> *TeleAntiFraud-28k was the original primary set but was dropped: it's Chinese and gated. See [docs/devlog/phase-0c-call-corpus.md](docs/devlog/phase-0c-call-corpus.md).*
 
 ## Model output schema
 
