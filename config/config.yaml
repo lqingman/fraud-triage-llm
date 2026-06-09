@@ -1,7 +1,7 @@
 # Central config. Override per-environment as needed.
 
 model:
-  base_model: "mistralai/Mistral-7B-Instruct-v0.3"   # or Qwen/Qwen2.5-7B-Instruct
+  base_model: "Qwen/Qwen2.5-7B-Instruct"   # ungated (no HF token); or mistralai/Mistral-7B-Instruct-v0.3
   max_seq_len: 2048
 
 qlora:
@@ -19,7 +19,7 @@ train:
   grad_accum: 4
   lr: 2.0e-4
   warmup_ratio: 0.03
-  output_dir: "models/mistral7b-fraud-qlora"
+  output_dir: "models/qwen7b-fraud-qlora"
   seed: 42
 
 data:
