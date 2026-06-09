@@ -26,9 +26,9 @@ Gradio demo  +  metrics/logging
 |---|---|---|
 | **English call corpus** (`--dataset calls`) | Primary train/val/test | ~9k phone-call transcripts unioned from [menaattia](https://huggingface.co/datasets/menaattia/phone-scam-dataset), [shakeleoatmeal](https://huggingface.co/datasets/shakeleoatmeal/phone-scam-detection-synthetic), [BothBosu multi-agent](https://huggingface.co/datasets/BothBosu/multi-agent-scam-conversation) + [single-agent](https://huggingface.co/datasets/BothBosu/single-agent-scam-conversations); ~50% fraud |
 | [BothBosu/scam-dialogue](https://huggingface.co/datasets/BothBosu/scam-dialogue) | Prototype | Original pipeline scaffold, more scam types |
-| [redasers/difraud](https://huggingface.co/datasets/redasers/difraud) | Cross-domain eval | 95k samples, 7 fraud domains — out-of-distribution check (never trained on) |
+| [tasksource/CLAIR_email_fraud](https://huggingface.co/datasets/tasksource/CLAIR_email_fraud) | Cross-domain eval | ~12k advance-fee ("419") fraud emails, explicit FRAUD label — out-of-distribution check (never trained on) |
 
-> *TeleAntiFraud-28k was the original primary set but was dropped: it's Chinese and gated. See [docs/devlog/phase-0c-call-corpus.md](docs/devlog/phase-0c-call-corpus.md).*
+> *Dataset history: TeleAntiFraud-28k (original primary) was dropped — Chinese + gated ([phase-0c](docs/devlog/phase-0c-call-corpus.md)); redasers/difraud (original cross-domain set) was retired — its label is "deceptive", not "fraud" ([phase-0d](docs/devlog/phase-0d-clair-crossdomain.md)).*
 
 ## Model output schema
 

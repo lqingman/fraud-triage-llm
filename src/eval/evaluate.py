@@ -6,7 +6,7 @@ Reports, on the held-out test set:
     imbalanced fraud; accuracy is misleading)
   - JSON-validity rate of model output (via schema.parse_verdict)
   - comparison vs. an XGBoost/TF-IDF baseline -> answers "why not classical ML?"
-  - cross-domain generalization on DIFRAUD (pass --crossdomain)
+  - cross-domain generalization on a held-out OOD set, e.g. CLAIR (--crossdomain)
 
 The XGBoost baseline is a *control group*, not a quality bar: it is always
 reported but never gates the build. The config.eval thresholds gate only the
@@ -23,6 +23,7 @@ import json
 import sys
 from pathlib import Path
 
+import joblib
 import yaml
 
 from src.data.schema import Risk, parse_verdict
@@ -185,7 +186,11 @@ def main() -> int:
     ap.add_argument("--predictions", type=Path, default=None,
                     help="raw LLM outputs aligned to the test split; enables LLM eval + the CI gate")
     ap.add_argument("--crossdomain", type=Path, default=None,
-                    help="dir with a DIFRAUD test.jsonl for out-of-distribution eval")
+                    help="dir with a cross-domain test.jsonl (e.g. CLAIR) for out-of-distribution eval")
+    ap.add_argument("--baseline-out", type=Path, default=Path("models/baseline_xgb.joblib"),
+                    help="where to persist the fitted TF-IDF+XGBoost baseline")
+    ap.add_argument("--metrics-out", type=Path, default=Path("reports/metrics.json"),
+                    help="where to write the metrics report (JSON)")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path("config/config.yaml").read_text(encoding="utf-8"))["eval"]
@@ -193,11 +198,18 @@ def main() -> int:
     train_texts, train_labels, _ = load_split(args.data / "train.jsonl")
     test_texts, test_gold, _ = load_split(args.data / "test.jsonl")
 
+    report: dict = {"data": str(args.data), "in_distribution": {}, "crossdomain": None}
+
     print(f"== In-distribution test ({args.data}) ==")
 
-    # --- Baseline (control group; reported, never gates) ---
+    # --- Baseline (control group; reported, never gates). Fit once, persist,
+    # and reuse for the cross-domain split below. ---
     pipeline = train_baseline(train_texts, train_labels)
+    args.baseline_out.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipeline, args.baseline_out)
     base = evaluate_baseline(pipeline, test_texts, test_gold)
+    report["in_distribution"]["baseline"] = base
+    report["baseline_model"] = str(args.baseline_out)
     print(f"  XGBoost baseline : {_fmt(base)}")
 
     # --- LLM (the thing we're actually building; gated when predictions exist) ---
@@ -205,6 +217,7 @@ def main() -> int:
     if args.predictions is not None:
         preds = _load_predictions(args.predictions)
         llm = evaluate_llm(preds, test_gold)
+        report["in_distribution"]["llm"] = llm
         print(f"  Fine-tuned LLM   : {_fmt(llm)}")
         failed = (
             llm["f1"] < cfg["min_f1"]
@@ -217,15 +230,23 @@ def main() -> int:
                 f"json_validity>={cfg['min_json_validity']}"
             )
     else:
+        report["in_distribution"]["llm"] = None
         print("  Fine-tuned LLM   : (no --predictions; skipping LLM eval + gate)")
 
-    # --- Cross-domain (DIFRAUD): honest out-of-distribution check ---
+    # --- Cross-domain (CLAIR): honest out-of-distribution check ---
     if args.crossdomain is not None:
         xd_texts, xd_gold, _ = load_split(args.crossdomain / "test.jsonl")
+        xd_base = evaluate_baseline(pipeline, xd_texts, xd_gold)
+        report["crossdomain"] = {"data": str(args.crossdomain), "baseline": xd_base}
         print(f"\n== Cross-domain test ({args.crossdomain}) ==")
-        print(f"  XGBoost baseline : {_fmt(evaluate_baseline(pipeline, xd_texts, xd_gold))}")
+        print(f"  XGBoost baseline : {_fmt(xd_base)}")
         if args.predictions is not None:
             print("  (LLM cross-domain eval expects a separate --predictions file for this split)")
+
+    report["gate_failed"] = failed
+    args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
+    args.metrics_out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"\nSaved baseline -> {args.baseline_out}\nSaved metrics  -> {args.metrics_out}")
 
     return 1 if failed else 0
 

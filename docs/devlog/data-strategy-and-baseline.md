@@ -4,6 +4,11 @@
 different datasets with distinct roles, and (2) why we benchmark the fine-tuned LLM against
 a classical XGBoost baseline.*
 
+> **Note on history.** The original plan used TeleAntiFraud-28k (primary) and redasers/difraud
+> (cross-domain). Both were dropped after inspection — TeleAntiFraud is Chinese and gated;
+> DIFRAUD's label is "deceptive," not "fraud." The *roles* below are unchanged; only the
+> datasets filling them changed. See `phase-0c-call-corpus.md` and `phase-0d-clair-crossdomain.md`.
+
 ---
 
 ## Part 1 — The three-dataset strategy
@@ -14,8 +19,8 @@ datasets play **three different roles in a pipeline**, like stations on an assem
 | Dataset | Role | Used for |
 |---|---|---|
 | **BothBosu/scam-dialogue** | Prototype | Get the pipeline working end to end |
-| **TeleAntiFraud-28k** | Primary train + test | Actually train and test the model |
-| **redasers/difraud** | Cross-domain eval | Stress-test generalization (never trained on) |
+| **English call corpus (~9k)** | Primary train + test | Actually train and test the model |
+| **CLAIR_email_fraud (~12k)** | Cross-domain eval | Stress-test generalization (never trained on) |
 
 ### BothBosu — the scaffold
 Small (1,600 rows), text-only, CPU-friendly. Its job is to get the **whole pipeline running**
@@ -23,24 +28,38 @@ Small (1,600 rows), text-only, CPU-friendly. Its job is to get the **whole pipel
 meant to produce a strong model — it has no gold rationales, so the `reason` field is templated.
 Think of it as a small test build before constructing the real thing.
 
-### TeleAntiFraud-28k — the workhorse
-Large (28,511 speech-text pairs), includes **audio + transcripts**, and crucially ships with
-**fraud-reasoning annotations** (the paper calls it a "slow-thinking" dataset). This is what
-actually teaches the model to produce analyst-style explanations, and its audio side feeds the
-Whisper ASR front-end (Phase 3). Final results are reported on this dataset.
+### English call corpus — the workhorse
+~9,000 English phone-call transcripts, unioned and de-duplicated from four HF datasets
+(`menaattia/phone-scam-dataset`, `shakeleoatmeal/phone-scam-detection-synthetic`,
+`BothBosu/multi-agent-scam-conversation`, `BothBosu/single-agent-scam-conversations`). Balanced
+(~50% fraud) with scam-type labels that drive `fraud_type`. We re-split it 75/10/15 and report
+in-distribution results here.
 
-### DIFRAUD — the unseen exam
-95k samples across **7 different fraud domains**. Used **only for evaluation, never for
-training**. It answers the single most important question about any ML model:
+*Honest limitations, worth saying out loud in an interview:*
+- **It's synthetic, and there is no large English phone-call fraud dataset** — real call
+  transcripts in English simply don't exist at scale (the one large *call* corpus,
+  TeleAntiFraud-28k, is Chinese and gated). ~9k is small but sufficient for QLoRA on a narrow,
+  format-heavy task.
+- **No gold rationales.** Like BothBosu, the `reason`/`flagged_spans` are templated, so the model
+  learns the *structure* of an explainable verdict, not richly-argued rationales. Recovering true
+  rationale quality would mean LLM-synthesized reasons — a deliberate piece of future work.
+
+### CLAIR — the unseen exam
+~12k advance-fee ("419") scam emails vs. legitimate email (`tasksource/CLAIR_email_fraud`), with
+an **explicit `FRAUD` / `NOT_FRAUD` label**. Used **only for evaluation, never for training**. It
+answers the single most important question about any ML model:
 
 > Did the model actually *learn to detect fraud*, or did it just *memorize the quirks of the
 > training data*?
 
-By testing on a genuinely different distribution, a high score here is honest evidence of
-generalization rather than overfitting.
+A different **channel** (email, not call) and a different **source** from the training set, so a
+high score here is honest evidence of generalization rather than overfitting. (We chose CLAIR
+over the originally-planned DIFRAUD precisely because CLAIR's positive class *is fraud* — DIFRAUD
+labeled generic "deception," including non-fraud domains like fake news and opinion spam, which
+would unfairly penalize a fraud model.)
 
-**One-line summary:** *BothBosu to rehearse → TeleAntiFraud to train and test → DIFRAUD as the
-final out-of-distribution exam.*
+**One-line summary:** *BothBosu to rehearse → call corpus to train and test → CLAIR as the final
+out-of-distribution exam.*
 
 ---
 
@@ -55,40 +74,38 @@ on top of it.** These are two different things.
 ### Two kinds of test
 
 **(a) In-distribution split — the classic 7/2/1.**
-On the primary dataset (TeleAntiFraud) we do exactly the textbook thing: split into
+On the primary dataset (the call corpus) we do exactly the textbook thing: split into
 train / validation / test (our config: 75/10/15), with the test set held out and never seen
-during training. This is what Phase 0 already does for BothBosu — the 1199/161/240 split.
+during training. Phase 0 produces this — a **6749 / 901 / 1350** split.
 
-**(b) Out-of-distribution test — DIFRAUD.**
+**(b) Out-of-distribution test — CLAIR.**
 A separate, harder exam *in addition to* (a).
 
 ### Why (a) alone is not enough
 
 The hidden flaw in a same-source split: train and test come from the **same origin** — same
-collection process, same recording setup, same speaking style, same labeling conventions. So a
-model can score high by learning **dataset-specific shortcuts** rather than the underlying
-signal of fraud.
+generators, same style, same labeling conventions. So a model can score high by learning
+**dataset-specific shortcuts** rather than the underlying signal of fraud.
 
 > **Analogy.** A same-source 7/2/1 split is like a final exam drawn from *the same workbook* you
 > studied. Score 95% — but did you *understand*, or did you *memorize that workbook's patterns*?
-> The cross-domain test (DIFRAUD) is a final exam from a *completely different workbook* — new
-> domains, new author. Still score 90%? You genuinely learned it. Drop to 60%? You were
+> The cross-domain test (CLAIR) is a final exam from a *completely different workbook* — different
+> channel, different author. Still score high? You genuinely learned it. Collapse? You were
 > memorizing. **That performance gap is the real measure of generalization** — something the
 > same-source split can never reveal.
 
-| | In-distribution (7/2/1) | Cross-domain (DIFRAUD) |
+| | In-distribution (7/2/1) | Cross-domain (CLAIR) |
 |---|---|---|
 | Question answered | "Learned this data's patterns?" | "Works on unfamiliar scenarios?" |
 | Failure mode | Score can be inflated (overfitting) | More honest, closer to production |
 | Industry term | in-distribution | out-of-distribution / cross-domain |
 
-**Not either/or — they're complementary.** Serious ML work (including the TeleAntiFraud paper)
-reports cross-domain results precisely because an in-distribution score alone invites the
-question "are you just overfitting?"
+**Not either/or — they're complementary.** An in-distribution score alone always invites the
+question "are you just overfitting?" — the cross-domain test is the answer.
 
 *Implementation detail worth mentioning in an interview:* splits are **stratified** on the
-binary fraud label, so the fraud ratio is preserved across train/val/test (verified: ~0.50 in
-all three BothBosu splits). This prevents class imbalance from being introduced by the split
+binary fraud label, so the fraud ratio is preserved across train/val/test (verified: 0.500 in
+all three call-corpus splits). This prevents class imbalance from being introduced by the split
 itself.
 
 ---
@@ -96,7 +113,7 @@ itself.
 ## Part 3 — Why benchmark against XGBoost
 
 The real "comparison" in this project is **not between datasets** — it's between **two models**:
-our fine-tuned LLM vs. a classical XGBoost classifier.
+our fine-tuned LLM vs. a classical XGBoost classifier (TF-IDF + XGBoost).
 
 ### The question an interviewer (or skeptic) will ask
 
@@ -125,9 +142,24 @@ audited, and used as evidence.**
 Run both models on the **same held-out test set** and report:
 
 - **F1 / PR-AUC** on the binary fraud label — to show the LLM is **at least as accurate** as
-  XGBoost (not worse).
+  XGBoost (not worse). PR-AUC is the headline number because fraud is imbalanced.
 - **LLM-only metrics** — JSON-validity rate and explanation quality — to show the LLM **delivers
   something XGBoost structurally cannot**: a defensible rationale.
+
+### What the baseline already shows
+
+The XGBoost baseline is fit and reported (persisted to `models/baseline_xgb.joblib`,
+`reports/metrics.json`). It already makes the overfitting story concrete:
+
+| | In-distribution (call test) | Cross-domain (CLAIR) |
+|---|---|---|
+| Precision / Recall / F1 | 0.99 / 0.99 / **0.989** | 0.43 / 0.85 / **0.572** |
+| PR-AUC | **0.999** | **0.381** |
+
+The ~0.99 → ~0.38 PR-AUC drop is exactly the "memorized the workbook" gap: a TF-IDF model trained
+on synthetic call vocabulary nearly aces its own held-out split but over-flags and loses ranking
+quality on real fraud emails. **That gap is the bar the fine-tuned LLM has to beat** — and the
+reason a model with genuine language understanding is worth the cost.
 
 ### The actual thesis
 
@@ -140,9 +172,10 @@ Run both models on the **same held-out test set** and report:
 
 ## TL;DR for an interview
 
-- **Three datasets, three jobs:** BothBosu (prototype the pipeline) → TeleAntiFraud (train +
-  in-distribution test) → DIFRAUD (out-of-distribution generalization test).
+- **Three datasets, three jobs:** BothBosu (prototype the pipeline) → English call corpus (train +
+  in-distribution test) → CLAIR fraud emails (out-of-distribution generalization test).
 - **Standard 7/2/1 is used** on the primary set; the cross-domain test is an **additional**,
   more honest check against overfitting — not a replacement.
-- **XGBoost is the control group**, not a rival to beat on accuracy. It proves the LLM matches
-  classical accuracy *while adding* the explainability the use case actually requires.
+- **XGBoost is the control group**, not a rival to beat on accuracy. The baseline's in-dist 0.999
+  vs. cross-domain 0.381 PR-AUC already shows the generalization gap; the LLM's job is to close
+  it *while adding* the explainability the use case actually requires.

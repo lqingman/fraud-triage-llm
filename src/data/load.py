@@ -4,8 +4,9 @@ Each example becomes:  PROMPT (system + transcript)  ->  COMPLETION (verdict JSO
 
 Implemented loaders:
   - calls      : combined English phone-call corpus (primary train/val set)
+  - clair      : tasksource/CLAIR_email_fraud (cross-domain, eval-only exam)
   - bothbosu   : BothBosu/scam-dialogue (original text-only prototype set)
-  - difraud    : redasers/difraud (cross-domain, eval-only exam)
+  - difraud    : redasers/difraud (RETIRED cross-domain set; kept but unused)
 TeleAntiFraud-28k was dropped (Chinese + gated); see _load_teleantifraud.
 """
 
@@ -59,18 +60,25 @@ def _scam_type_to_fraudtype(call_type: str | None) -> FraudType:
             return ft
     return FraudType.other
 
-# DIFRAUD (redasers/difraud): the cross-domain exam. 7 domains, each row a
-# {text, label} pair (label 1 = deceptive/fraud, 0 = non-deceptive). Used ONLY
-# for out-of-distribution eval, never for training (see EVAL_ONLY below).
+# CLAIR (tasksource/CLAIR_email_fraud): the cross-domain exam. The classic CLAIR
+# corpus of advance-fee ("419") scam emails vs. legitimate email, each row a
+# {text, label} pair where label is "FRAUD" / "NOT_FRAUD". Used ONLY for
+# out-of-distribution eval, never for training (see EVAL_ONLY below). Its label
+# is *fraud* (not generic "deception"), and it's a different channel (email) and
+# source from the phone-call training set — a clean "same task, different
+# channel" generalization test.
+CLAIR_REPO = "tasksource/CLAIR_email_fraud"
+
+# DIFRAUD (redasers/difraud): RETIRED as the cross-domain set. Its label is
+# "deceptive", not "fraud" — 4 of its 7 domains (fake_news, political_statements,
+# product_reviews, twitter_rumours) are deception but NOT fraud, so scoring a
+# fraud model against them is unfair. Replaced by CLAIR. Loader kept but unused;
+# if ever revived, restrict to the genuinely-fraud domains below.
 DIFRAUD_REPO = "redasers/difraud"
 DIFRAUD_DOMAINS = (
-    "fake_news",
-    "job_scams",
     "phishing",
-    "political_statements",
-    "product_reviews",
+    "job_scams",
     "sms",
-    "twitter_rumours",
 )
 
 # The English phone-call corpus = the primary train/val set (TeleAntiFraud-28k
@@ -189,6 +197,43 @@ def difraud_row_to_verdict(row: dict, domain: str) -> FraudVerdict:
     )
 
 
+def clair_row_to_verdict(row: dict) -> FraudVerdict:
+    """Map one CLAIR {text, label: FRAUD|NOT_FRAUD} row onto a FraudVerdict.
+
+    CLAIR has an explicit fraud label but no fine-grained scam type or gold
+    rationale, so fraud rows -> high/`other` with a templated reason, non-fraud
+    -> low/`none`. Validating through FraudVerdict makes bad rows fail loudly.
+    """
+    is_fraud = str(row["label"]).strip().upper() == "FRAUD"
+    if is_fraud:
+        return FraudVerdict(
+            risk=Risk.high,
+            fraud_type=FraudType.other,
+            reason="Cross-domain email labeled fraudulent (advance-fee / scam pattern).",
+            flagged_spans=[],
+        )
+    return FraudVerdict(
+        risk=Risk.low,
+        fraud_type=FraudType.none,
+        reason="Cross-domain email labeled non-fraudulent.",
+        flagged_spans=[],
+    )
+
+
+def _load_clair():
+    """Load tasksource/CLAIR_email_fraud and yield (text, verdict_dict) pairs.
+
+    Cross-domain eval only, so we pull just the canonical `test` split and never
+    train/val — CLAIR is never trained on.
+    """
+    from datasets import load_dataset
+
+    ds = load_dataset(CLAIR_REPO, split="test")
+    for row in ds:
+        verdict = clair_row_to_verdict(row)
+        yield row["text"], verdict.model_dump(mode="json")
+
+
 def _load_teleantifraud():
     """Dropped: TeleAntiFraud-28k is Chinese, and gated on HF. The primary
     train set is now the English call corpus (see _load_calls / CALL_SOURCES)."""
@@ -220,13 +265,14 @@ def _load_difraud():
 LOADERS = {
     "bothbosu": _load_bothbosu,
     "calls": _load_calls,
+    "clair": _load_clair,
     "teleantifraud": _load_teleantifraud,
     "difraud": _load_difraud,
 }
 
 # Datasets used only as out-of-distribution exams: never trained on, so we skip
 # the train/val/test re-split and emit a single held-out test.jsonl.
-EVAL_ONLY = {"difraud"}
+EVAL_ONLY = {"clair", "difraud"}
 
 
 def _load_config() -> dict:

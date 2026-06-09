@@ -27,7 +27,9 @@ data:
   # TeleAntiFraud-28k was dropped: Chinese + gated. See src/data/load.py CALL_SOURCES.
   primary: "english-call-corpus"
   prototype: "bothbosu/scam-dialogue"
-  crossdomain_eval: "redasers/difraud"
+  # Cross-domain OOD exam: fraud emails (explicit FRAUD label). Replaced
+  # redasers/difraud, whose label was "deceptive" (incl. non-fraud domains).
+  crossdomain_eval: "tasksource/CLAIR_email_fraud"
   test_size: 0.15
   val_size: 0.10
 

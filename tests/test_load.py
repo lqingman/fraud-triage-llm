@@ -9,6 +9,7 @@ from src.data.load import (
     _scam_type_to_fraudtype,
     bothbosu_row_to_verdict,
     call_row_to_verdict,
+    clair_row_to_verdict,
     difraud_row_to_verdict,
     format_example,
 )
@@ -66,6 +67,21 @@ def test_call_row_to_verdict_no_type_reads_cleanly():
     assert legit.risk == Risk.low
     assert legit.fraud_type == FraudType.none
     assert "None" not in legit.reason and legit.reason
+
+
+def test_clair_fraud_maps_to_high_other():
+    v = clair_row_to_verdict({"text": "Dear Friend, I am a Nigerian prince...", "label": "FRAUD"})
+    assert v.risk == Risk.high
+    assert v.fraud_type == FraudType.other
+    assert v.is_fraud is True
+    assert v.reason
+
+
+def test_clair_not_fraud_maps_to_none_low():
+    v = clair_row_to_verdict({"text": "see you at 3pm", "label": "NOT_FRAUD"})
+    assert v.risk == Risk.low
+    assert v.fraud_type == FraudType.none
+    assert v.is_fraud is False
 
 
 def test_difraud_deceptive_maps_to_high_other():
