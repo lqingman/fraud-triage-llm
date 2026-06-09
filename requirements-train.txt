@@ -1,0 +1,15 @@
+# Training deps (Phase 1) — Linux + NVIDIA GPU only (Kaggle / Colab).
+# Do NOT install on Windows: bitsandbytes has no reliable Windows wheel.
+#   pip install -r requirements-base.txt -r requirements-train.txt
+
+-r requirements-base.txt
+
+transformers>=4.44
+peft>=0.12
+bitsandbytes>=0.43
+accelerate>=0.33
+trl>=0.9
+# unsloth   # optional: faster QLoRA; install per their platform-specific instructions
+
+# --- Experiment tracking ---
+wandb>=0.17

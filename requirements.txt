@@ -1,3 +1,12 @@
+# Full reference of every dependency across all phases.
+#
+# For local work on Windows/macOS, do NOT install this file directly:
+# `vllm` (no Windows wheel) and `bitsandbytes` (no reliable Windows wheel)
+# will fail. Instead install per environment:
+#   - local (Phase 0 data, Phase 2 eval):  pip install -r requirements-base.txt
+#   - Kaggle/Colab GPU training (Phase 1):  pip install -r requirements-train.txt
+#   - serving image (Phase 4, Docker):      pip install -r requirements-serve.txt
+
 # --- Core fine-tuning (Phase 1) ---
 transformers>=4.44
 peft>=0.12

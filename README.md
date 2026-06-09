@@ -55,9 +55,11 @@ Every prediction is validated against `src/data/schema.py`:
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate   # Windows
-pip install -r requirements.txt
-pytest                                            # schema tests
+pip install -r requirements-base.txt              # light, cross-platform (Phase 0 + 2)
+pytest                                            # schema + data tests
 python -m src.data.load --dataset bothbosu --out data/processed   # Phase 0
 ```
 
-Heavy training (Phase 1) runs on Kaggle/Colab — see `notebooks/kaggle_train.py`.
+Heavy training (Phase 1) runs on Kaggle/Colab — see `notebooks/kaggle_train.py`
+(`requirements-train.txt`). Serving (Phase 4) runs in Docker (`requirements-serve.txt`).
+Both pull `vllm`/`bitsandbytes`, which have no Windows wheels — keep them off local installs.

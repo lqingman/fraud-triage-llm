@@ -1,0 +1,19 @@
+# Base deps — light, cross-platform. Everything needed locally for
+# Phase 0 (data) and Phase 2 (eval). No GPU / no platform-specific wheels.
+#   pip install -r requirements-base.txt
+
+# --- Data loading (Phase 0) ---
+datasets>=2.20
+
+# --- Schema / validation ---
+pydantic>=2.7
+
+# --- Eval (Phase 2) ---
+scikit-learn>=1.5
+xgboost>=2.1          # classical baseline for comparison
+pandas>=2.2
+numpy>=1.26
+
+# --- Dev ---
+pytest>=8.0
+pyyaml>=6.0

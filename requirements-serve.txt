@@ -1,0 +1,14 @@
+# Serving deps (Phase 4) — Linux + NVIDIA GPU only (Docker image).
+# vllm has no Windows wheel; build/run these inside src/serve/Dockerfile.
+#   pip install -r requirements-base.txt -r requirements-serve.txt
+
+-r requirements-base.txt
+
+# --- API + inference ---
+fastapi>=0.111
+uvicorn[standard]>=0.30
+vllm>=0.5             # GPU inference server
+gradio>=4.0          # demo UI
+
+# --- ASR frontend (Phase 3) ---
+faster-whisper>=1.0   # off-the-shelf; we do NOT train this
