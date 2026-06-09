@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Data & models (large / not versioned)
+data/raw/
+data/processed/
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# Secrets & env
+.env
+*.key
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db

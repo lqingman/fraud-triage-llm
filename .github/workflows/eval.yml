@@ -1,0 +1,29 @@
+# Phase 5 — CI. Schema tests run on every push. The eval-regression gate runs
+# when evaluation artifacts are present, and FAILS the build if F1 / PR-AUC /
+# JSON-validity drop below config/config.yaml thresholds. This "model
+# regression test" is the part most portfolio projects lack.
+
+name: eval
+
+on: [push, pull_request]
+
+jobs:
+  test-and-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (lightweight, CPU-only for CI)
+        run: |
+          pip install pydantic pyyaml pytest scikit-learn pandas numpy
+      - name: Schema tests
+        run: pytest -q
+      - name: Eval-regression gate
+        run: |
+          if [ -f data/eval/predictions.jsonl ]; then
+            python -m src.eval.evaluate   # exits non-zero if below thresholds
+          else
+            echo "No eval artifacts yet — skipping gate (Phase 2 not run)."
+          fi

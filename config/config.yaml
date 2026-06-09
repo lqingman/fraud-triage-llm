@@ -1,0 +1,44 @@
+# Central config. Override per-environment as needed.
+
+model:
+  base_model: "mistralai/Mistral-7B-Instruct-v0.3"   # or Qwen/Qwen2.5-7B-Instruct
+  max_seq_len: 2048
+
+qlora:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_compute_dtype: "bfloat16"
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+train:
+  epochs: 3
+  batch_size: 4
+  grad_accum: 4
+  lr: 2.0e-4
+  warmup_ratio: 0.03
+  output_dir: "models/mistral7b-fraud-qlora"
+  seed: 42
+
+data:
+  primary: "teleantifraud-28k"
+  prototype: "bothbosu/scam-dialogue"
+  crossdomain_eval: "redasers/difraud"
+  test_size: 0.15
+  val_size: 0.10
+
+asr:
+  whisper_model: "base"     # base/small/medium; off-the-shelf
+
+serve:
+  quantization: "awq"
+  host: "0.0.0.0"
+  port: 8000
+
+eval:
+  # CI fails the build if these regress below threshold
+  min_f1: 0.85
+  min_pr_auc: 0.85
+  min_json_validity: 0.98

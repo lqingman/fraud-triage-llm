@@ -1,0 +1,33 @@
+# --- Core fine-tuning (Phase 1) ---
+transformers>=4.44
+peft>=0.12
+bitsandbytes>=0.43
+accelerate>=0.33
+datasets>=2.20
+trl>=0.9
+# unsloth   # optional: faster QLoRA; install per their platform-specific instructions
+
+# --- Schema / validation ---
+pydantic>=2.7
+
+# --- Eval (Phase 2) ---
+scikit-learn>=1.5
+xgboost>=2.1          # classical baseline for comparison
+pandas>=2.2
+numpy>=1.26
+
+# --- ASR frontend (Phase 3) ---
+faster-whisper>=1.0   # off-the-shelf; we do NOT train this
+
+# --- Serving (Phase 4) ---
+fastapi>=0.111
+uvicorn[standard]>=0.30
+vllm>=0.5             # GPU inference server
+gradio>=4.0           # demo UI
+
+# --- Experiment tracking ---
+wandb>=0.17
+
+# --- Dev ---
+pytest>=8.0
+pyyaml>=6.0

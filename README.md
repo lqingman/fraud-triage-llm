@@ -1,0 +1,63 @@
+# Fraud-Triage-LLM
+
+Explainable telecom-fraud triage: **speech → transcript → fine-tuned LLM → structured fraud verdict**, served in production.
+
+This is not a binary classifier. The model is QLoRA-fine-tuned to emit a *structured, explainable verdict* — a fraud-analyst-style judgment with the specific phrases that triggered it — which is something a classical classifier (XGBoost) cannot do. The eval suite explicitly compares against that baseline to justify the LLM.
+
+## Pipeline
+
+```
+Scam call audio
+   │  Whisper (ASR)                      src/asr/
+   ▼
+Transcript
+   │  QLoRA-fine-tuned 7B LLM            src/train/  src/serve/
+   ▼
+Structured verdict (JSON):
+   { risk, fraud_type, reason, flagged_spans }
+   │  FastAPI + vLLM in Docker           src/serve/
+   ▼
+Gradio demo  +  metrics/logging
+```
+
+## Datasets
+
+| Dataset | Role | Notes |
+|---|---|---|
+| [TeleAntiFraud-28k](https://arxiv.org/html/2503.24115v2) | Primary train/test | 28.5k audio+text, ~48% fraud (balanced) |
+| [BothBosu/scam-dialogue](https://huggingface.co/datasets/BothBosu/scam-dialogue) | Text transcripts | Quick prototyping, more scam types |
+| [redasers/difraud](https://huggingface.co/datasets/redasers/difraud) | Cross-domain eval | 95k samples, 7 fraud domains — generalization check |
+
+## Model output schema
+
+Every prediction is validated against `src/data/schema.py`:
+
+```json
+{
+  "risk": "high",
+  "fraud_type": "tech_support_scam",
+  "reason": "Caller claimed to be Microsoft support and requested remote access and gift-card payment.",
+  "flagged_spans": ["remote access to your computer", "pay with gift cards"]
+}
+```
+
+## Build phases
+
+- [ ] **Phase 0** — Data: load, format to instruction, held-out split, baseline number
+- [ ] **Phase 1** — QLoRA fine-tune (Kaggle free GPU) + W&B tracking
+- [ ] **Phase 2** — Eval harness: F1 / PR-AUC / JSON-validity + XGBoost baseline + DIFRAUD cross-domain
+- [ ] **Phase 3** — Whisper ASR frontend (off-the-shelf, not trained)
+- [ ] **Phase 4** — Serving: vLLM + FastAPI + AWQ + Docker + load test + guardrails + observability
+- [ ] **Phase 5** — CI/CD: GitHub Actions eval-regression gate, README polish, demo link
+- [ ] **Phase 6 (optional)** — RAG over known scam-script knowledge base for richer explanations
+
+## Quickstart
+
+```bash
+python -m venv .venv && .venv\Scripts\activate   # Windows
+pip install -r requirements.txt
+pytest                                            # schema tests
+python -m src.data.load --dataset bothbosu --out data/processed   # Phase 0
+```
+
+Heavy training (Phase 1) runs on Kaggle/Colab — see `notebooks/kaggle_train.py`.
