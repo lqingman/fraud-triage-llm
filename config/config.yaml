@@ -2,7 +2,7 @@
 
 model:
   base_model: "Qwen/Qwen2.5-7B-Instruct"   # ungated (no HF token); or mistralai/Mistral-7B-Instruct-v0.3
-  max_seq_len: 2048
+  max_seq_len: 1024   # 1024 fits a single free T4; the 152k-vocab logits upcast OOMs at 2048
 
 qlora:
   load_in_4bit: true
@@ -14,9 +14,12 @@ qlora:
   target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
 
 train:
-  epochs: 3
-  batch_size: 4
-  grad_accum: 4
+  # Tuned for a single free Kaggle T4 (16GB). batch_size>2 OOMs on the loss-time
+  # logits.float() upcast over Qwen's 152k vocab; epochs=1 keeps one run inside a
+  # 12h session. Bump epochs / batch on bigger GPUs for a fuller run.
+  epochs: 1
+  batch_size: 2
+  grad_accum: 8       # effective batch 16
   lr: 2.0e-4
   warmup_ratio: 0.03
   output_dir: "models/qwen7b-fraud-qlora"
