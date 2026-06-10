@@ -135,14 +135,20 @@ def train(cfg: dict) -> str:
     import torch
     from datasets import load_dataset
     from transformers import set_seed
-    from trl import DataCollatorForCompletionOnlyLM, SFTConfig, SFTTrainer
+    from trl import SFTConfig, SFTTrainer
 
     tcfg = cfg["train"]
     set_seed(tcfg.get("seed", 42))
 
     model, tokenizer = _load_model_and_tokenizer(cfg)
-    eos = tokenizer.eos_token or ""
 
+    # The splits already have `prompt` and `completion` columns. Modern TRL
+    # (>=0.20, which dropped DataCollatorForCompletionOnlyLM) detects this
+    # prompt-completion format and, with completion_only_loss=True, masks the
+    # prompt and trains on the verdict JSON only — no manual collator needed. It
+    # also appends EOS to the completion, so the model learns to stop. (RESPONSE_
+    # TEMPLATE / build_sft_text remain the documented boundary contract, asserted
+    # in tests/test_train.py.)
     ds = load_dataset(
         "json",
         data_files={
@@ -150,9 +156,6 @@ def train(cfg: dict) -> str:
             "validation": "data/processed/val.jsonl",
         },
     )
-    ds = ds.map(lambda row: {"text": build_sft_text(row, eos)})
-
-    collator = DataCollatorForCompletionOnlyLM(RESPONSE_TEMPLATE, tokenizer=tokenizer)
 
     bf16 = _resolve_dtype(cfg["qlora"].get("bnb_4bit_compute_dtype", "bfloat16")) == torch.bfloat16
     sft_config = SFTConfig(
@@ -164,7 +167,8 @@ def train(cfg: dict) -> str:
         learning_rate=float(tcfg.get("lr", 2e-4)),
         warmup_ratio=tcfg.get("warmup_ratio", 0.03),
         lr_scheduler_type="cosine",
-        max_seq_length=cfg["model"].get("max_seq_len", 2048),
+        max_length=cfg["model"].get("max_seq_len", 2048),
+        completion_only_loss=True,
         bf16=bf16,
         fp16=not bf16,
         gradient_checkpointing=True,
@@ -173,7 +177,6 @@ def train(cfg: dict) -> str:
         save_strategy="epoch",
         logging_steps=10,
         optim="paged_adamw_8bit",
-        dataset_text_field="text",
         report_to=["wandb"] if _wandb_available() else [],
         seed=tcfg.get("seed", 42),
     )
@@ -183,8 +186,8 @@ def train(cfg: dict) -> str:
         args=sft_config,
         train_dataset=ds["train"],
         eval_dataset=ds["validation"],
+        processing_class=tokenizer,
         peft_config=_build_lora_config(cfg["qlora"]),
-        data_collator=collator,
     )
     trainer.train()
 
