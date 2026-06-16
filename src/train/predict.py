@@ -53,6 +53,11 @@ def load_adapter_model(base_model: str, adapter_dir: str, qcfg: dict):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
+    # Left truncation is critical: the prompt ends with the "\n\nVerdict:"
+    # instruction, so a long transcript truncated on the RIGHT (the default)
+    # loses that marker and the model just continues the dialogue instead of
+    # emitting a verdict. Truncate the START of the transcript instead.
+    tokenizer.truncation_side = "left"
 
     base = AutoModelForCausalLM.from_pretrained(
         base_model,
@@ -69,7 +74,7 @@ def generate(
     model,
     tokenizer,
     prompts: list[str],
-    max_new_tokens: int = 128,
+    max_new_tokens: int = 256,
     batch_size: int = 8,
     max_length: int = 2048,
 ) -> list[str]:
@@ -118,7 +123,7 @@ def main() -> None:
                     help="dir with the trained LoRA adapter + tokenizer")
     ap.add_argument("--out", type=Path, default=Path("reports/predictions.jsonl"),
                     help="predictions file (reports/ is committable; data/ and models/ are gitignored)")
-    ap.add_argument("--max-new-tokens", type=int, default=128)
+    ap.add_argument("--max-new-tokens", type=int, default=256)
     ap.add_argument("--batch-size", type=int, default=8)
     args = ap.parse_args()
 
