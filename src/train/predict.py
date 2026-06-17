@@ -70,13 +70,15 @@ def load_adapter_model(base_model: str, adapter_dir: str, qcfg: dict):
     return model, tokenizer
 
 
-# Training fed "{prompt} {completion}", i.e. the prompt's "Verdict:" suffix was
-# always followed by " {\"risk\"...}". We replay that by priming each prompt with
-# this exact opening, so generation starts INSIDE the JSON object and the model
-# cannot drift into prose ("This appears to be a scam...") instead of emitting a
-# verdict — the dominant json_validity failure mode. The forced "{" is stripped
+# Training fed "{prompt} {completion}", and every completion is json.dumps(...)
+# starting with the exact prefix `{"risk": "`. We replay that by priming each
+# prompt with this opening, so generation resumes INSIDE the JSON value and the
+# model can neither drift into prose ("This appears to be a scam...") nor echo
+# the schema template `{risk, fraud_type, ...}` that appears in the system prompt
+# — the two json_validity failure modes. A shallow `{` primer hits the schema
+# echo, so we prime all the way to the first value. The primed text is stripped
 # from the model's continuation, so we prepend it back to rebuild valid JSON.
-_JSON_PRIMER = " {"
+_JSON_PRIMER = ' {"risk": "'
 
 
 def generate(
@@ -92,12 +94,13 @@ def generate(
     `prompts`.
 
     Greedy (do_sample=False) keeps the gated metrics deterministic. Each prompt
-    is primed with _JSON_PRIMER so the model resumes a JSON object instead of
-    narrating; we decode only tokens past the (primed) prompt and prepend "{".
+    is primed with _JSON_PRIMER so the model resumes a JSON value instead of
+    narrating; we decode only tokens past the (primed) prompt and prepend the
+    primer back so the prediction is a complete JSON object.
     """
     import torch
 
-    restored_brace = _JSON_PRIMER.lstrip()  # "{"
+    restored_prefix = _JSON_PRIMER.lstrip()  # '{"risk": "'
     outputs: list[str] = []
     for start in range(0, len(prompts), batch_size):
         batch = [p + _JSON_PRIMER for p in prompts[start : start + batch_size]]
@@ -122,7 +125,7 @@ def generate(
         input_len = enc["input_ids"].shape[1]
         new_tokens = gen[:, input_len:]
         decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-        outputs.extend(restored_brace + d for d in decoded)
+        outputs.extend(restored_prefix + d for d in decoded)
     return outputs
 
 
