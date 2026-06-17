@@ -70,26 +70,37 @@ def load_adapter_model(base_model: str, adapter_dir: str, qcfg: dict):
     return model, tokenizer
 
 
+# Training fed "{prompt} {completion}", i.e. the prompt's "Verdict:" suffix was
+# always followed by " {\"risk\"...}". We replay that by priming each prompt with
+# this exact opening, so generation starts INSIDE the JSON object and the model
+# cannot drift into prose ("This appears to be a scam...") instead of emitting a
+# verdict — the dominant json_validity failure mode. The forced "{" is stripped
+# from the model's continuation, so we prepend it back to rebuild valid JSON.
+_JSON_PRIMER = " {"
+
+
 def generate(
     model,
     tokenizer,
     prompts: list[str],
-    max_new_tokens: int = 256,
+    max_new_tokens: int = 96,
     batch_size: int = 8,
     max_length: int = 2048,
 ) -> list[str]:
     """Greedy-decode a verdict JSON per prompt. Returns only the newly generated
-    text (the completion), aligned 1:1 with `prompts`.
+    text (the completion, with the primed "{" restored), aligned 1:1 with
+    `prompts`.
 
-    Greedy (do_sample=False) keeps the gated metrics deterministic. We decode
-    only tokens past the prompt length so the returned string is just the
-    completion, which keeps json_validity high.
+    Greedy (do_sample=False) keeps the gated metrics deterministic. Each prompt
+    is primed with _JSON_PRIMER so the model resumes a JSON object instead of
+    narrating; we decode only tokens past the (primed) prompt and prepend "{".
     """
     import torch
 
+    restored_brace = _JSON_PRIMER.lstrip()  # "{"
     outputs: list[str] = []
     for start in range(0, len(prompts), batch_size):
-        batch = prompts[start : start + batch_size]
+        batch = [p + _JSON_PRIMER for p in prompts[start : start + batch_size]]
         enc = tokenizer(
             batch,
             return_tensors="pt",
@@ -106,11 +117,12 @@ def generate(
                 eos_token_id=tokenizer.eos_token_id,
                 pad_token_id=tokenizer.pad_token_id,
             )
-        # Strip the prompt: with left padding, the prompt occupies the first
-        # input_len columns for every row in the batch.
+        # Strip the prompt: with left padding, the (primed) prompt occupies the
+        # first input_len columns for every row in the batch.
         input_len = enc["input_ids"].shape[1]
         new_tokens = gen[:, input_len:]
-        outputs.extend(tokenizer.batch_decode(new_tokens, skip_special_tokens=True))
+        decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+        outputs.extend(restored_brace + d for d in decoded)
     return outputs
 
 
@@ -123,7 +135,7 @@ def main() -> None:
                     help="dir with the trained LoRA adapter + tokenizer")
     ap.add_argument("--out", type=Path, default=Path("reports/predictions.jsonl"),
                     help="predictions file (reports/ is committable; data/ and models/ are gitignored)")
-    ap.add_argument("--max-new-tokens", type=int, default=256)
+    ap.add_argument("--max-new-tokens", type=int, default=96)
     ap.add_argument("--batch-size", type=int, default=8)
     args = ap.parse_args()
 
