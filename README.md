@@ -46,7 +46,7 @@ Every prediction is validated against `src/data/schema.py`:
 ## Build phases
 
 - [x] **Phase 0** — Data: load, format to instruction, held-out split, baseline number
-- [~] **Phase 1** — QLoRA fine-tune (Kaggle free GPU) + W&B tracking — _code + offline tests done; GPU training run pending_
+- [x] **Phase 1** — QLoRA fine-tune (Kaggle free GPU) — Qwen2.5-7B, test f1=0.941 / pr_auc=0.937 / json_validity=0.947
 - [x] **Phase 2** — Eval harness: F1 / PR-AUC / JSON-validity + XGBoost baseline + CLAIR cross-domain
 - [ ] **Phase 3** — Whisper ASR frontend (off-the-shelf, not trained)
 - [ ] **Phase 4** — Serving: vLLM + FastAPI + AWQ + Docker + load test + guardrails + observability
