@@ -153,6 +153,27 @@ def evaluate_baseline(pipeline, texts: list[str], gold_is_fraud: list[bool]) -> 
     return metrics
 
 
+def evaluate_crossdomain(
+    pipeline,
+    xd_texts: list[str],
+    xd_gold: list[bool],
+    xd_preds: list[str] | None = None,
+) -> dict:
+    """Score the cross-domain (OOD) split: always the XGBoost baseline, and the
+    fine-tuned LLM too when its predictions are supplied.
+
+    The baseline is the call-trained control reused on the new channel (e.g.
+    CLAIR emails); the LLM block answers "does the fine-tuned model generalize
+    better than classical ML off-domain?". Returns {"baseline", "llm"} where
+    "llm" is None if no predictions were given. This is reported, never gated:
+    OOD F1 is expected below the in-distribution floor, so gating it would turn
+    an honest generalization check into a false regression.
+    """
+    base = evaluate_baseline(pipeline, xd_texts, xd_gold)
+    llm = evaluate_llm(xd_preds, xd_gold) if xd_preds is not None else None
+    return {"baseline": base, "llm": llm}
+
+
 def _load_predictions(path: Path) -> list[str]:
     """Read raw LLM outputs aligned 1:1 with the test split.
 
@@ -187,11 +208,17 @@ def main() -> int:
                     help="raw LLM outputs aligned to the test split; enables LLM eval + the CI gate")
     ap.add_argument("--crossdomain", type=Path, default=None,
                     help="dir with a cross-domain test.jsonl (e.g. CLAIR) for out-of-distribution eval")
+    ap.add_argument("--crossdomain-predictions", type=Path, default=None,
+                    help="raw LLM outputs aligned to the cross-domain test split; adds an LLM "
+                         "row to the cross-domain report (reported, never gated)")
     ap.add_argument("--baseline-out", type=Path, default=Path("models/baseline_xgb.joblib"),
                     help="where to persist the fitted TF-IDF+XGBoost baseline")
     ap.add_argument("--metrics-out", type=Path, default=Path("reports/metrics.json"),
                     help="where to write the metrics report (JSON)")
     args = ap.parse_args()
+
+    if args.crossdomain_predictions is not None and args.crossdomain is None:
+        ap.error("--crossdomain-predictions requires --crossdomain (the split they align to)")
 
     cfg = yaml.safe_load(Path("config/config.yaml").read_text(encoding="utf-8"))["eval"]
 
@@ -233,15 +260,19 @@ def main() -> int:
         report["in_distribution"]["llm"] = None
         print("  Fine-tuned LLM   : (no --predictions; skipping LLM eval + gate)")
 
-    # --- Cross-domain (CLAIR): honest out-of-distribution check ---
+    # --- Cross-domain (CLAIR): honest out-of-distribution check. Reported, never
+    # gated — OOD F1 is expected below the in-distribution floor. ---
     if args.crossdomain is not None:
         xd_texts, xd_gold, _ = load_split(args.crossdomain / "test.jsonl")
-        xd_base = evaluate_baseline(pipeline, xd_texts, xd_gold)
-        report["crossdomain"] = {"data": str(args.crossdomain), "baseline": xd_base}
+        xd_preds = _load_predictions(args.crossdomain_predictions) if args.crossdomain_predictions else None
+        xd = evaluate_crossdomain(pipeline, xd_texts, xd_gold, xd_preds)
+        report["crossdomain"] = {"data": str(args.crossdomain), **xd}
         print(f"\n== Cross-domain test ({args.crossdomain}) ==")
-        print(f"  XGBoost baseline : {_fmt(xd_base)}")
-        if args.predictions is not None:
-            print("  (LLM cross-domain eval expects a separate --predictions file for this split)")
+        print(f"  XGBoost baseline : {_fmt(xd['baseline'])}")
+        if xd["llm"] is not None:
+            print(f"  Fine-tuned LLM   : {_fmt(xd['llm'])}")
+        else:
+            print("  Fine-tuned LLM   : (no --crossdomain-predictions; baseline only)")
 
     report["gate_failed"] = failed
     args.metrics_out.parent.mkdir(parents=True, exist_ok=True)

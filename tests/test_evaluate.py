@@ -9,6 +9,7 @@ import pytest
 from src.data.load import SYSTEM_PROMPT, format_example
 from src.eval.evaluate import (
     _extract_transcript,
+    evaluate_crossdomain,
     evaluate_llm,
     load_split,
 )
@@ -50,6 +51,43 @@ def test_evaluate_llm_unparseable_counts_as_miss():
 def test_evaluate_llm_length_mismatch_raises():
     with pytest.raises(ValueError):
         evaluate_llm([_FRAUD], [True, False])
+
+
+class _StubPipeline:
+    """Fake fitted baseline so evaluate_crossdomain is testable without XGBoost
+    or network. predict() echoes a fixed label list; predict_proba() returns the
+    [P(not), P(fraud)] columns evaluate_baseline reads."""
+
+    def __init__(self, preds: list[bool]):
+        self._preds = [int(p) for p in preds]
+
+    def predict(self, texts):
+        return self._preds[: len(texts)]
+
+    def predict_proba(self, texts):
+        import numpy as np
+
+        return np.array([[1 - p, float(p)] for p in self._preds[: len(texts)]])
+
+
+def test_evaluate_crossdomain_with_llm_preds():
+    # Two CLAIR-shaped rows: both fraud. Baseline misses one; LLM catches both.
+    xd_gold = [True, True]
+    pipeline = _StubPipeline([True, False])  # baseline: 1 hit, 1 miss
+    xd = evaluate_crossdomain(pipeline, ["e1", "e2"], xd_gold, xd_preds=[_FRAUD, _FRAUD])
+
+    assert xd["baseline"]["recall"] == 0.5  # baseline missed one fraud
+    assert xd["llm"] is not None
+    assert xd["llm"]["recall"] == 1.0       # LLM caught both
+    assert xd["llm"]["json_validity"] == 1.0
+    assert xd["llm"]["n"] == 2
+
+
+def test_evaluate_crossdomain_baseline_only():
+    pipeline = _StubPipeline([True, False])
+    xd = evaluate_crossdomain(pipeline, ["e1", "e2"], [True, True], xd_preds=None)
+    assert xd["llm"] is None
+    assert "baseline" in xd
 
 
 def test_load_split_reads_gold_label_from_completion(tmp_path):
