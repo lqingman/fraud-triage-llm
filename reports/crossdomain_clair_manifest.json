@@ -1,0 +1,36 @@
+{
+  "experiment": "CLAIR cross-domain evaluation",
+  "run_date": "2026-06-23",
+  "sample_count": 1926,
+  "artifacts": {
+    "metrics_crossdomain_clair.json": {
+      "sha256": "0c3414ec2b9eecc2e00937cefb4bb6fc34742167787b46a9e910eae280baf645"
+    },
+    "predictions_clair.jsonl": {
+      "sha256": "1d53b1365076ff3cdaf60bf015f483f05160188f16633e011e2807ac825c6d9a",
+      "non_empty_rows": 1926,
+      "jsonl_rows_with_prediction_key": 1926
+    }
+  },
+  "data_sha256": {
+    "calls_train_jsonl": "2874148db33e255c8301d0c6f1b9080e33496d986a6e5e147ddb10aeaed8bc28",
+    "calls_val_jsonl": "f9c55de976926125aa12d4e2f92e6d33fa0015897c6a0f9a34ba2f23e1fa05a2",
+    "calls_test_jsonl": "b7f5a6edcfc55ab9b479dac65032c447cca5c25704cf1d40f5c377f17b72c66c",
+    "clair_test_jsonl": "abccec803b4d16388717b58dbef2a215da97c7282b4905b4123383523096c9a4"
+  },
+  "kaggle_metrics": {
+    "baseline_f1": 0.5775862068965517,
+    "baseline_pr_auc": 0.4138429832323984,
+    "llm_f1": 0.8030385241454151,
+    "llm_pr_auc": 0.7083739706527536,
+    "llm_json_validity": 0.9330218068535826
+  },
+  "local_replay": {
+    "xgboost_version": "3.2.0",
+    "scikit_learn_version": "1.9.0",
+    "llm_metrics_exact_match": true,
+    "baseline_f1": 0.5723270440251572,
+    "baseline_pr_auc": 0.3813189027413827,
+    "note": "Call train/test transcripts and labels are identical to the supplied Kaggle splits. The historical Kaggle package versions were not captured, so its baseline model cannot yet be reproduced exactly."
+  }
+}

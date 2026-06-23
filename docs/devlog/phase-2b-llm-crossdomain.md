@@ -1,8 +1,7 @@
 # Phase 2b — LLM cross-domain eval on CLAIR (the "why LLM, not XGBoost" payoff)
 
-**Date:** 2026-06-21
-**Status:** Code + tests done and wired; awaiting the real Kaggle predict run to
-fill in the LLM CLAIR numbers (table below has a placeholder row).
+**Date:** 2026-06-23
+**Status:** Complete — the real Kaggle cross-domain run is reported below.
 
 ## Goal
 
@@ -58,9 +57,12 @@ regression. The cross-domain LLM row is informational; `gate_failed` ignores it.
   - Cross-domain baseline: **f1 0.572 / pr_auc 0.381 (n=1926)** — reproduces the
     documented collapse.
   - Cross-domain LLM (preds=gold): f1 1.000 / json_validity 1.000 — confirms the
-    branch parses, scores, and prints. (Real numbers from Kaggle replace this.)
+    branch parses, scores, and prints.
 - Arg guard: `--crossdomain-predictions` without `--crossdomain` → exit 2 with the
   intended message.
+- Real Kaggle run (2026-06-23): Qwen2.5-7B plus the trained QLoRA adapter produced
+  1,926 predictions on the CLAIR test split. The evaluation completed without a
+  runtime error and produced the metrics in the results table below.
 
 ## Kaggle run steps (real LLM predictions)
 
@@ -86,11 +88,48 @@ python -m src.eval.evaluate \
 
 | model            | precision | recall | f1        | pr_auc    | json_validity |
 |------------------|-----------|--------|-----------|-----------|---------------|
-| XGBoost baseline | 0.431     | 0.850  | **0.572** | 0.381     | —             |
-| Fine-tuned LLM   | _TBD_     | _TBD_  | **_TBD_** | _TBD_     | _TBD_         |
+| XGBoost baseline | 0.435     | 0.861  | **0.578** | 0.414     | —             |
+| Fine-tuned LLM   | **0.750** | **0.864** | **0.803** | **0.708** | 0.933       |
 
-> Fill the LLM row from the Kaggle run's printout / `reports/metrics.json`
-> (`crossdomain.llm`). The thesis holds if LLM f1 ≫ 0.572.
+The fine-tuned LLM improves cross-domain F1 by **0.225 absolute** over the
+baseline (0.803 vs. 0.578), a **38.9% relative gain**. Recall is nearly unchanged
+(0.864 vs. 0.861), while precision rises from 0.435 to 0.750; the gain therefore
+comes mainly from substantially fewer false positives. PR-AUC also improves by
+0.294 (0.708 vs. 0.414). These results support the central hypothesis: compared
+with the call-trained TF-IDF/XGBoost control, the fine-tuned LLM transfers much
+better from phone-call transcripts to fraud emails.
+
+> These baseline values differ slightly from the earlier Phase 0d snapshot
+> (F1 0.572 / PR-AUC 0.381). For a controlled comparison, this table uses the
+> baseline and LLM values emitted by the **same 2026-06-23 Kaggle evaluation run**
+> on the same regenerated CLAIR split (`n=1926`).
+
+### Saved artifacts and reproduction check
+
+The original Kaggle artifacts are preserved as
+`reports/metrics_crossdomain_clair.json` and
+`reports/predictions_clair.jsonl`. The prediction file contains exactly 1,926
+non-empty JSONL records, each with a `prediction` field.
+
+- metrics SHA-256:
+  `0c3414ec2b9eecc2e00937cefb4bb6fc34742167787b46a9e910eae280baf645`
+- predictions SHA-256:
+  `1d53b1365076ff3cdaf60bf015f483f05160188f16633e011e2807ac825c6d9a`
+- exact LLM metrics: precision 0.7497467072, recall 0.8644859813,
+  F1 0.8030385241, PR-AUC 0.7083739707, JSON validity 0.9330218069.
+
+A local replay with the saved predictions reproduced all LLM metrics exactly.
+It did **not** reproduce the same-run XGBoost row: the local environment yields
+F1 0.5723270440 / PR-AUC 0.3813189027, versus Kaggle's F1 0.5775862069 /
+PR-AUC 0.4138429832. A subsequent comparison against the supplied Kaggle splits
+confirmed that extracted train/test transcripts and labels are identical in
+content and order, ruling out data membership or alignment as the cause. The
+remaining difference is environment-dependent: the historical Kaggle XGBoost
+and scikit-learn versions were not captured, while the requirements specify
+only lower bounds. LLM prediction alignment is exactly reproducible; the saved
+same-run baseline remains valid evidence, but cannot currently be regenerated
+bit-for-bit. Artifact, data, and replay details are recorded in
+`reports/crossdomain_clair_manifest.json`.
 
 ## Caveats / trade-offs
 
@@ -102,11 +141,15 @@ python -m src.eval.evaluate \
   emits a verdict rather than continuing the text. Long-email truncation is a known
   limitation of the free-tier config, not a harness bug.
 - **json_validity off-domain may differ** from the 0.947 in-distribution figure;
-  it's reported but does not gate cross-domain.
+  the measured value is 0.933 (about 6.7% of outputs are not valid JSON). It is
+  reported but does not gate cross-domain, and should be treated as a deployment
+  reliability limitation even though classification quality is strong.
 
 ## Follow-ups
 
-- [ ] Run Kaggle predict on CLAIR, fill the LLM row, commit `reports/metrics.json`.
+- [x] Run Kaggle predict on CLAIR and fill the LLM row.
+- [ ] Download and commit the Kaggle `reports/metrics.json` and, if artifact size
+      permits, `reports/predictions_clair.jsonl` for exact reproducibility.
 - [ ] Add the LLM-vs-baseline cross-domain comparison to the README once real
       numbers land.
 - [ ] (Optional) CI: cross-domain predictions are Kaggle artifacts not committed

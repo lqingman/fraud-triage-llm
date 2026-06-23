@@ -1,0 +1,33 @@
+{
+  "data": "data/processed",
+  "in_distribution": {
+    "baseline": {
+      "precision": 0.9925595238095238,
+      "recall": 0.9881481481481481,
+      "f1": 0.9903489235337788,
+      "pr_auc": 0.9993167749209979,
+      "n": 1350
+    },
+    "llm": null
+  },
+  "crossdomain": {
+    "data": "data/processed/clair",
+    "baseline": {
+      "precision": 0.4345518867924528,
+      "recall": 0.860981308411215,
+      "f1": 0.5775862068965517,
+      "pr_auc": 0.4138429832323984,
+      "n": 1926
+    },
+    "llm": {
+      "precision": 0.7497467071935157,
+      "recall": 0.8644859813084113,
+      "f1": 0.8030385241454151,
+      "pr_auc": 0.7083739706527536,
+      "json_validity": 0.9330218068535826,
+      "n": 1926
+    }
+  },
+  "baseline_model": "models/baseline_xgb.joblib",
+  "gate_failed": false
+}
