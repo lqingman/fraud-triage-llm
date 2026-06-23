@@ -39,16 +39,18 @@ without opening the Kaggle notebook.
 
 ## Priority 1 — Error analysis
 
-- [ ] Generate a per-example analysis table containing the gold label, parsed
+- [x] Generate a per-example analysis table containing the gold label, parsed
       prediction, validity flag, and error category.
-- [ ] Produce the LLM confusion matrix.
-- [ ] Count invalid JSON outputs and split them by fraud/non-fraud gold label.
-- [ ] Sample and review at least 20 examples from each available category:
+- [x] Produce the LLM confusion matrix.
+- [x] Count invalid JSON outputs and split them by fraud/non-fraud gold label.
+- [x] Sample and review at least 20 examples from each available category:
   - false positives;
   - false negatives;
   - invalid JSON;
   - XGBoost wrong / LLM correct.
-- [ ] Summarise 4–6 recurring error patterns in a short Markdown report.
+- [x] Summarise 4–6 recurring error patterns in a short Markdown report.
+- [x] Run the same analysis on the 1,350-row in-domain call test set and compare
+      failure rates with CLAIR.
 
 **Done when:** the aggregate score is accompanied by concrete failure modes and
 actionable examples.
@@ -118,3 +120,13 @@ corpus and does not depend only on CLAIR email characteristics.
 - 2026-06-23: Supplied Kaggle train/test transcripts and labels match the local
   inputs exactly. The remaining baseline difference is environment-dependent;
   Kaggle package versions were not captured. Added a hash/version manifest.
+- 2026-06-23: Completed automated CLAIR error analysis. Confusion matrix is
+  TN=823, FP=247, FN=116, TP=740. Of 129 invalid outputs, 112 omit required
+  fields and 98 occur on fraud examples. Schema failures account for 98 of 116
+  false negatives. One generic high-risk verdict accounts for 246 of 247 false
+  positives and retains call-domain wording (`Caller`) on email inputs.
+- 2026-06-23: Completed matching in-domain analysis. In-domain FP rate is 1.3%
+  (9/675) versus CLAIR's 23.1% (247/1070), while invalid-output rates are much
+  closer (5.3% vs. 6.7%). This separates two problems: schema adherence is a
+  general model weakness; the repeated default-high false positives are mainly
+  a cross-domain failure.
