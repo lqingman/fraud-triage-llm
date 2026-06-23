@@ -1,23 +1,33 @@
 # Fraud-Triage-LLM
 
-Explainable telecom-fraud triage: **speech → transcript → fine-tuned LLM → structured fraud verdict**, served in production.
+Production-oriented telecom-fraud triage: **call transcript → fine-tuned LLM → structured, explainable fraud verdict**. The completed pipeline covers data preparation, QLoRA training, deterministic inference, and evaluation; audio ingestion and production serving remain roadmap work.
 
-This is not a binary classifier. The model is QLoRA-fine-tuned to emit a *structured, explainable verdict* — a fraud-analyst-style judgment with the specific phrases that triggered it — which is something a classical classifier (XGBoost) cannot do. The eval suite explicitly compares against that baseline to justify the LLM.
+Rather than returning only a binary label, the model emits a schema-validated analyst-style verdict with risk level, fraud type, rationale, and supporting transcript spans. The evaluation suite compares it with a TF-IDF/XGBoost control so the accuracy, reliability, and explainability trade-offs are visible rather than assumed.
+
+## Resume-ready description
+
+**Fraud-Triage-LLM | Python, PyTorch, Hugging Face, QLoRA/PEFT, XGBoost, Pydantic, pytest, GitHub Actions**
+
+- Built a modular Python ML pipeline that transforms English call transcripts into schema-validated fraud risk, fraud type, rationale, and supporting evidence; prepared an approximately 9,000-transcript corpus with reproducible train/validation/test splits.
+- Fine-tuned Qwen2.5-7B-Instruct with 4-bit QLoRA on a single 16 GB T4 GPU using completion-only loss, gradient checkpointing, and deterministic inference, achieving **0.941 F1**, **0.937 PR-AUC**, and **94.7% valid JSON** on 1,350 held-out calls.
+- Developed an evaluation and reliability harness with a TF-IDF/XGBoost baseline, out-of-domain fraud-email testing, Pydantic output contracts, regression thresholds, and **36 unit tests**; automated CPU-safe tests with GitHub Actions and documented model, data, and infrastructure trade-offs.
+
+The repository also contains FastAPI, Docker, retry/fallback guardrail, Whisper, and vLLM scaffolding. Those components are intentionally described as work in progress until the end-to-end service and load/observability tests are complete.
 
 ## Pipeline
 
 ```
 Scam call audio
-   │  Whisper (ASR)                      src/asr/
+   │  Whisper (ASR, planned)             src/asr/
    ▼
 Transcript
    │  QLoRA-fine-tuned 7B LLM            src/train/  src/serve/
    ▼
 Structured verdict (JSON):
    { risk, fraud_type, reason, flagged_spans }
-   │  FastAPI + vLLM in Docker           src/serve/
+   │  FastAPI + vLLM in Docker (planned) src/serve/
    ▼
-Gradio demo  +  metrics/logging
+API + metrics/logging (planned)
 ```
 
 ## Datasets
@@ -43,15 +53,63 @@ Every prediction is validated against `src/data/schema.py`:
 }
 ```
 
-## Build phases
+## Implementation roadmap
 
-- [x] **Phase 0** — Data: load, format to instruction, held-out split, baseline number
-- [x] **Phase 1** — QLoRA fine-tune (Kaggle free GPU) — Qwen2.5-7B, test f1=0.941 / pr_auc=0.937 / json_validity=0.947
-- [x] **Phase 2** — Eval harness: F1 / PR-AUC / JSON-validity + XGBoost baseline + CLAIR cross-domain
-- [ ] **Phase 3** — Whisper ASR frontend (off-the-shelf, not trained)
-- [ ] **Phase 4** — Serving: vLLM + FastAPI + AWQ + Docker + load test + guardrails + observability
-- [ ] **Phase 5** — CI/CD: GitHub Actions eval-regression gate, README polish, demo link
-- [ ] **Phase 6 (optional)** — RAG over known scam-script knowledge base for richer explanations
+### Completed: model development and evaluation
+
+- [x] Build a configuration-driven data pipeline for loading, normalizing, instruction formatting, and reproducible train/validation/test splitting.
+- [x] Fine-tune Qwen2.5-7B with 4-bit QLoRA on a single T4 GPU.
+- [x] Implement deterministic batch inference and schema-validated structured predictions.
+- [x] Evaluate precision, recall, F1, PR-AUC, and JSON validity on a held-out test set.
+- [x] Train and persist a TF-IDF/XGBoost baseline for controlled comparison.
+- [x] Add a CLAIR fraud-email split for out-of-distribution evaluation.
+- [x] Add unit tests for data mappings, schema contracts, training boundaries, prediction artifacts, and evaluation logic.
+
+### Priority 1: complete the end-to-end inference service
+
+- [ ] Implement `faster-whisper` audio transcription and temporary-file cleanup.
+- [ ] Connect the FastAPI text endpoint to a vLLM OpenAI-compatible inference server.
+- [ ] Complete the audio endpoint: upload validation → transcription → model inference → validated verdict.
+- [ ] Integrate retry/fallback guardrails into both inference paths and test malformed model outputs.
+- [ ] Add request-size limits, timeouts, structured errors, and `/health` and `/ready` probes.
+- [ ] Pin the GPU/CUDA runtime and produce a reproducible multi-stage Docker image.
+
+### Priority 2: experiment tracking and model lineage
+
+- [ ] Integrate MLflow tracking for training parameters, dataset version, Git commit, metrics, and artifacts.
+- [ ] Log the LoRA adapter, tokenizer, evaluation report, and model card for every candidate run.
+- [ ] Register promoted model versions in the MLflow Model Registry with staging/production aliases.
+- [ ] Add DVC or immutable dataset manifests to reproduce the exact training and evaluation splits.
+- [ ] Define a promotion policy based on F1, PR-AUC, JSON validity, latency, and responsible-AI checks.
+
+### Priority 3: CI/CD and quality gates
+
+- [ ] Extend GitHub Actions with formatting, linting, type checking, security scanning, and the full CPU unit-test suite.
+- [ ] Commit a small, license-safe evaluation fixture so model-regression logic runs in CI instead of being skipped when prediction artifacts are absent.
+- [ ] Build and scan the Docker image in CI and publish versioned images only after quality gates pass.
+- [ ] Add a deployment workflow with environment approval and an automated post-deployment smoke test.
+- [ ] Protect the main branch with required reviews and passing CI checks.
+
+### Priority 4: observability, performance, and drift
+
+- [ ] Expose Prometheus metrics for request volume, p50/p95 latency, throughput, failures, retries, and invalid-output rate.
+- [ ] Add structured logs with correlation IDs while redacting transcripts and other sensitive data.
+- [ ] Build a Grafana dashboard and alerts for latency, error rate, service health, and model-output quality.
+- [ ] Run Locust or k6 load tests; document concurrency, throughput, GPU utilization, and p95 latency.
+- [ ] Monitor input/output drift and fraud-type distribution changes without storing raw sensitive calls.
+- [ ] Define rollback and human-review procedures for degraded or uncertain predictions.
+
+### Priority 5: model validation and portfolio demo
+
+- [ ] Generate real Qwen predictions on CLAIR and report LLM versus XGBoost cross-domain results.
+- [ ] Report confusion matrices, per-fraud-type metrics, calibration, and performance under simulated ASR errors.
+- [ ] Add responsible-AI tests for demographic cues, false positives, prompt injection, and unsupported explanations.
+- [ ] Build a Gradio demo for transcript and audio inputs backed by the deployed API.
+- [ ] Publish an architecture diagram, API examples, model card, limitations, and a short demonstration video.
+
+### Optional extension
+
+- [ ] Add retrieval over a versioned scam-pattern knowledge base and evaluate whether it improves explanation quality without reducing detection performance.
 
 ## Quickstart
 
