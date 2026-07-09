@@ -135,10 +135,52 @@ real vLLM inference server (Phase 4, GPU) uses Docker
 (`requirements-serve.txt`). Both pull `vllm`/`bitsandbytes`, which have no
 Windows wheels — keep them off local installs.
 
-Other tooling added since:
+By default there's no LLM backend configured, so `/triage/text` and
+`/triage/audio` return the guardrails' safe fallback verdict (`risk=medium`)
+instead of erroring — that's the intended behavior, not a bug. Point
+`VLLM_BASE_URL` (default `http://localhost:8000/v1`) at a real
+OpenAI-compatible vLLM server to get real verdicts:
+
 ```bash
-docker build -f src/serve/Dockerfile -t fraud-triage-llm-api .        # Phase 4d: build the serving image
-docker compose -f monitoring/docker-compose.yml up --build            # Phase 4g: app + Prometheus + Grafana locally
-locust -f tests/load/locustfile.py --host http://127.0.0.1:8000 \
-  --headless -u 20 -r 5 -t 30s --csv reports/load_test               # Phase 4e: load test (see requirements-loadtest.txt)
+curl -X POST http://127.0.0.1:8000/triage/text \
+  -H "Content-Type: application/json" \
+  -d '{"transcript": "Congratulations, you won a prize! Just pay a shipping fee with a gift card."}'
+
+curl -X POST http://127.0.0.1:8000/triage/audio -F "file=@call.wav;type=audio/wav"
+
+curl http://127.0.0.1:8000/health     # process liveness
+curl http://127.0.0.1:8000/ready      # 200 if VLLM_BASE_URL is reachable, else 503
+curl http://127.0.0.1:8000/metrics    # Prometheus exposition format
 ```
+
+### Docker (Phase 4d)
+
+```bash
+docker build -f src/serve/Dockerfile -t fraud-triage-llm-api .
+docker run -p 8000:8000 fraud-triage-llm-api
+# optional: -e VLLM_BASE_URL=http://your-vllm-host:8000/v1 to point at a real backend
+```
+
+### Observability stack — Prometheus + Grafana (Phase 4g)
+
+```bash
+docker compose -f monitoring/docker-compose.yml up --build
+```
+Then open **http://localhost:3000** (Grafana — anonymous viewer access is
+enabled for this dev stack, no login needed; the "Fraud-Triage-LLM" dashboard
+is pre-provisioned) and **http://localhost:9090** (Prometheus). Generate some
+traffic first (the curl commands above, or the load test below) so the
+dashboard has something to show. Tear down with
+`docker compose -f monitoring/docker-compose.yml down`.
+
+### Load testing (Phase 4e)
+
+```bash
+pip install -r requirements-loadtest.txt
+uvicorn src.serve.app:app &
+locust -f tests/load/locustfile.py --host http://127.0.0.1:8000 \
+  --headless -u 20 -r 5 -t 30s --csv reports/load_test
+```
+Results land in `reports/load_test_stats.csv`; see `reports/load_test.md` for
+the last documented run (38 req/s, p95 17ms on `/triage/text` with no backend
+attached — see the caveat there about what that number does and doesn't mean).
