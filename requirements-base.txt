@@ -1,7 +1,7 @@
 # Base deps — light, cross-platform, no GPU / no platform-specific wheels.
 # Everything needed locally for Phase 0 (data), Phase 2 (eval), Phase 4's
-# FastAPI serving layer + guardrails (unit-testable without a GPU or a
-# running vLLM server), and MLflow tracking on the eval side.
+# FastAPI serving layer + guardrails + observability (unit-testable without a
+# GPU or a running vLLM server), and MLflow tracking on the eval side.
 #   pip install -r requirements-base.txt
 
 # --- Data loading (Phase 0) ---
@@ -25,6 +25,7 @@ mlflow>=2.14
 # only actually running vllm (requirements-serve.txt) needs one. ---
 fastapi>=0.111
 httpx>=0.27            # HTTP client to an OpenAI-compatible vLLM server
+prometheus-client>=0.20
 python-multipart>=0.0.9  # required by FastAPI's UploadFile (audio endpoint)
 
 # --- Dev ---

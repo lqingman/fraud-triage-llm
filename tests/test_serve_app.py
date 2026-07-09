@@ -1,10 +1,11 @@
 """Phase 4 serving tests — FastAPI TestClient + a stubbed llm_client, no
 network/GPU/real vLLM server. Exercises the full request path: guardrails,
-privacy-safe logging, size limits, and /ready."""
+privacy-safe logging, size limits, /ready, and Prometheus /metrics."""
 
 import logging
 
 from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 
 from src.serve import llm_client
 from src.serve.app import MAX_TRANSCRIPT_CHARS, app
@@ -74,3 +75,34 @@ def test_transcript_never_appears_in_logs(monkeypatch, caplog):
     for record in caplog.records:
         assert secret_marker not in record.getMessage()
         assert secret_marker not in str(record.__dict__)
+
+
+def test_metrics_endpoint_exposes_prometheus_format(monkeypatch):
+    monkeypatch.setattr(llm_client, "complete", lambda prompt, **kw: _FRAUD_JSON)
+    client.post("/triage/text", json={"transcript": "hi"})
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+    text = resp.text
+    assert "http_requests_total" in text
+    assert "http_request_latency_seconds" in text
+
+
+def test_triage_text_increments_request_counter(monkeypatch):
+    monkeypatch.setattr(llm_client, "complete", lambda prompt, **kw: _FRAUD_JSON)
+    before = REGISTRY.get_sample_value(
+        "http_requests_total", {"endpoint": "/triage/text", "status": "200"}
+    ) or 0
+    client.post("/triage/text", json={"transcript": "hi"})
+    after = REGISTRY.get_sample_value(
+        "http_requests_total", {"endpoint": "/triage/text", "status": "200"}
+    )
+    assert after == before + 1
+
+
+def test_malformed_output_increments_invalid_output_counter(monkeypatch):
+    monkeypatch.setattr(llm_client, "complete", lambda prompt, **kw: "garbage")
+    before = REGISTRY.get_sample_value("triage_invalid_output_total") or 0
+    client.post("/triage/text", json={"transcript": "hi"})
+    after = REGISTRY.get_sample_value("triage_invalid_output_total")
+    # MAX_RETRIES + 1 failed parse attempts per request (guardrails retries).
+    assert after > before

@@ -8,9 +8,10 @@ Two endpoints:
 
 The text path is fully wired: src.serve.llm_client talks to an
 OpenAI-compatible completions endpoint (a real vLLM server, or anything else
-that speaks the same protocol), and src.serve.guardrails.safe_generate
-retries and falls back to a safe verdict on a parse failure or a downed
-backend.
+that speaks the same protocol), src.serve.guardrails.safe_generate retries and
+falls back to a safe verdict on a parse failure or a downed backend, and
+src.serve.metrics tracks request volume/latency/invalid-output rate for the
+/metrics endpoint.
 
 Privacy note: request logs carry a correlation id, method, path, status, and
 latency — never the transcript or uploaded file content.
@@ -29,7 +30,7 @@ from pydantic import BaseModel
 
 from src.data.load import format_prompt
 from src.data.schema import FraudVerdict
-from src.serve import llm_client
+from src.serve import llm_client, metrics
 from src.serve.guardrails import safe_generate
 
 logger = logging.getLogger("fraud_triage")
@@ -56,11 +57,14 @@ class TextRequest(BaseModel):
 
 
 @app.middleware("http")
-async def _request_logging(request: Request, call_next):
+async def _request_logging_and_metrics(request: Request, call_next):
     correlation_id = uuid.uuid4().hex
     start = time.perf_counter()
     response = await call_next(request)
     duration_s = time.perf_counter() - start
+
+    endpoint = request.url.path
+    metrics.observe_request(endpoint=endpoint, status=response.status_code, duration_s=duration_s)
 
     # Structured, privacy-aware: correlation id + metadata only, never body content.
     logger.info(
@@ -68,7 +72,7 @@ async def _request_logging(request: Request, call_next):
         extra={
             "correlation_id": correlation_id,
             "method": request.method,
-            "path": request.url.path,
+            "path": endpoint,
             "status_code": response.status_code,
             "duration_ms": round(duration_s * 1000, 2),
         },
@@ -95,6 +99,11 @@ def ready() -> Response:
     )
 
 
+@app.get("/metrics")
+def metrics_endpoint() -> Response:
+    return Response(content=metrics.render(), media_type=metrics.CONTENT_TYPE)
+
+
 @app.post("/triage/text", response_model=FraudVerdict)
 def triage_text(req: TextRequest) -> FraudVerdict:
     if len(req.transcript) > MAX_TRANSCRIPT_CHARS:
@@ -103,7 +112,7 @@ def triage_text(req: TextRequest) -> FraudVerdict:
             detail=f"transcript exceeds max_transcript_chars ({MAX_TRANSCRIPT_CHARS})",
         )
     prompt = format_prompt(req.transcript)
-    return safe_generate(_generate, prompt)
+    return safe_generate(_generate, prompt, on_invalid=metrics.record_invalid_output)
 
 
 @app.post("/triage/audio", response_model=FraudVerdict)
