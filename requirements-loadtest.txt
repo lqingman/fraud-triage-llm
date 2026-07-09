@@ -1,0 +1,7 @@
+# Load-testing dep (tests/load/locustfile.py) — dev-only, not needed to run
+# or test the app itself.
+#   pip install -r requirements-base.txt -r requirements-loadtest.txt
+
+-r requirements-base.txt
+
+locust>=2.24
