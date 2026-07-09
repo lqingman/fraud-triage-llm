@@ -18,7 +18,7 @@ jobs:
         run: docker build -f src/serve/Dockerfile -t fraud-triage-llm-api:ci .
 
       - name: Scan image with Trivy (fails on fixable CRITICAL/HIGH CVEs)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: fraud-triage-llm-api:ci
           severity: CRITICAL,HIGH
