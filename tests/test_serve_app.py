@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
 import src.serve.app as app_module
-from src.serve import llm_client
+from src.serve import drift, llm_client
 from src.serve.app import MAX_AUDIO_BYTES, MAX_TRANSCRIPT_CHARS, app
 
 client = TestClient(app)
@@ -167,3 +167,13 @@ def test_triage_audio_never_logs_filename_or_content(monkeypatch, caplog):
     for record in caplog.records:
         assert secret_filename not in record.getMessage()
         assert secret_filename not in str(record.__dict__)
+
+
+def test_triage_text_syncs_drift_gauges_with_tracker(monkeypatch):
+    # Reset the shared module-level tracker so this test isn't order-dependent
+    # on how many /triage/* calls earlier tests in this file already made.
+    drift.TRACKER.reset()
+    monkeypatch.setattr(llm_client, "complete", lambda prompt, **kw: _FRAUD_JSON)
+    client.post("/triage/text", json={"transcript": "hi"})
+    assert REGISTRY.get_sample_value("triage_fraud_rate_window") == drift.fraud_rate()
+    assert REGISTRY.get_sample_value("triage_drift_alert") == (1.0 if drift.is_drifting() else 0.0)

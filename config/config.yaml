@@ -46,6 +46,14 @@ serve:
   max_transcript_chars: 20000   # reject oversized /triage/text requests with 422
   max_audio_bytes: 26214400     # 25 MiB; reject oversized /triage/audio uploads with 422
 
+monitoring:
+  # Rolling-window drift check on predicted risk (src/serve/drift.py) vs the
+  # training corpus's fraud rate. PSI > psi_alert_threshold flips
+  # triage_drift_alert; 0.25 is the standard "significant shift" heuristic.
+  drift_window: 200
+  baseline_fraud_rate: 0.5   # ~50% fraud in the English call corpus (see README Datasets)
+  psi_alert_threshold: 0.25
+
 eval:
   # CI fails the build if these regress below threshold. These are regression
   # FLOORS (catch a model getting worse), not aspirations.

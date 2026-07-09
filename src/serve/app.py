@@ -9,9 +9,12 @@ OpenAI-compatible completions endpoint (a real vLLM server, or anything else
 that speaks the same protocol), src.serve.guardrails.safe_generate retries and
 falls back to a safe verdict on a parse failure or a downed backend, and
 src.serve.metrics tracks request volume/latency/invalid-output rate for the
-/metrics endpoint. The audio path additionally runs faster-whisper (CPU) on
-an uploaded file written to a temp path that is always cleaned up, even if
-transcription fails.
+/metrics endpoint. Every verdict also feeds src.serve.drift's rolling
+fraud-rate window, so a sustained distribution shift (including the
+guardrails' fallback firing on every request during a backend outage) shows
+up as a Prometheus alert, not silently. The audio path additionally runs
+faster-whisper (CPU) on an uploaded file written to a temp path that is
+always cleaned up, even if transcription fails.
 
 Privacy note: request logs carry a correlation id, method, path, status, and
 latency — never the transcript, audio content, or uploaded filename.
@@ -33,7 +36,7 @@ from pydantic import BaseModel
 from src.asr.transcribe import transcribe as asr_transcribe
 from src.data.load import format_prompt
 from src.data.schema import FraudVerdict
-from src.serve import llm_client, metrics
+from src.serve import drift, llm_client, metrics
 from src.serve.guardrails import safe_generate
 
 logger = logging.getLogger("fraud_triage")
@@ -112,7 +115,10 @@ def metrics_endpoint() -> Response:
 
 def _triage(transcript: str) -> FraudVerdict:
     prompt = format_prompt(transcript)
-    return safe_generate(_generate, prompt, on_invalid=metrics.record_invalid_output)
+    verdict = safe_generate(_generate, prompt, on_invalid=metrics.record_invalid_output)
+    drift.record(verdict.is_fraud)
+    metrics.observe_drift(drift.fraud_rate(), drift.is_drifting())
+    return verdict
 
 
 @app.post("/triage/text", response_model=FraudVerdict)
