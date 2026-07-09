@@ -1,0 +1,39 @@
+# Phase 4g — local observability stack: the serving image (src/serve/Dockerfile)
+# + Prometheus (scraping its /metrics) + Grafana (pre-provisioned with a
+# datasource and dashboard querying real metric names from
+# src/serve/metrics.py). Dev tooling, not the shipped app — image tags are
+# "latest" here; pin exact versions if this stack itself ever ships anywhere.
+#
+# Run from the repo root:
+#   docker compose -f monitoring/docker-compose.yml up --build
+# Then open http://localhost:3000 (admin/admin) and http://localhost:9090.
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: src/serve/Dockerfile
+    ports:
+      - "8000:8000"
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
