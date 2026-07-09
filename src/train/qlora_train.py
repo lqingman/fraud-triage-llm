@@ -126,6 +126,21 @@ def _wandb_available() -> bool:
     return bool(os.environ.get("WANDB_API_KEY"))
 
 
+def _mlflow_available() -> bool:
+    """True only if mlflow is importable, mirroring _wandb_available's guard.
+
+    Unlike wandb this needs no API key (MLflow defaults to a local ./mlruns
+    file store), so a Kaggle run with mlflow installed logs training params/
+    metrics for free via Trainer's built-in MLflow integration
+    (`report_to=["mlflow"]`) with zero extra code here. Note: this path is
+    code-complete but only ever exercised on Kaggle/Colab (no GPU in this
+    dev environment) — see docs/devlog/phase-4b-mlflow.md.
+    """
+    import importlib.util
+
+    return importlib.util.find_spec("mlflow") is not None
+
+
 def train(cfg: dict) -> str:
     """QLoRA SFT on data/processed/{train,val}.jsonl. Returns the adapter dir.
 
@@ -177,7 +192,7 @@ def train(cfg: dict) -> str:
         save_strategy="epoch",
         logging_steps=10,
         optim="paged_adamw_8bit",
-        report_to=["wandb"] if _wandb_available() else [],
+        report_to=(["wandb"] if _wandb_available() else []) + (["mlflow"] if _mlflow_available() else []),
         seed=tcfg.get("seed", 42),
     )
 
@@ -195,6 +210,27 @@ def train(cfg: dict) -> str:
     trainer.save_model(out_dir)  # adapter weights only (small)
     tokenizer.save_pretrained(out_dir)
     print(f"Saved LoRA adapter + tokenizer -> {out_dir}")
+
+    if _mlflow_available():
+        import mlflow
+
+        # Trainer's built-in MLflow integration (report_to=["mlflow"]) already
+        # logged per-epoch training/eval metrics under its own auto-created
+        # run; log the adapter artifact + git commit as a follow-up run so the
+        # trained artifact is queryable/downloadable from the same experiment.
+        import subprocess
+
+        try:
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, check=True
+            ).stdout.strip()
+        except Exception:
+            commit = "unknown"
+        mlflow.set_experiment("fraud-triage-llm-training")
+        with mlflow.start_run(run_name="qlora-adapter"):
+            mlflow.log_params({"base_model": cfg["model"]["base_model"], "git_commit": commit, **tcfg})
+            mlflow.log_artifacts(out_dir, artifact_path="adapter")
+
     return out_dir
 
 

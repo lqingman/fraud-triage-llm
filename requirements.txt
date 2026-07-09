@@ -40,6 +40,7 @@ gradio>=4.0           # demo UI
 
 # --- Experiment tracking ---
 wandb>=0.17
+mlflow>=2.14
 
 # --- Dev ---
 pytest>=8.0

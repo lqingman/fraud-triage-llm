@@ -1,7 +1,7 @@
 # Base deps — light, cross-platform, no GPU / no platform-specific wheels.
-# Everything needed locally for Phase 0 (data), Phase 2 (eval), and Phase 4's
+# Everything needed locally for Phase 0 (data), Phase 2 (eval), Phase 4's
 # FastAPI serving layer + guardrails (unit-testable without a GPU or a
-# running vLLM server).
+# running vLLM server), and MLflow tracking on the eval side.
 #   pip install -r requirements-base.txt
 
 # --- Data loading (Phase 0) ---
@@ -15,6 +15,11 @@ scikit-learn>=1.5
 xgboost>=2.1          # classical baseline for comparison
 pandas>=2.2
 numpy>=1.26
+
+# --- Experiment tracking (eval-side: tracking + registry run locally, no
+# GPU needed; the training-side integration in src/train/qlora_train.py only
+# runs on Kaggle) ---
+mlflow>=2.14
 
 # --- Serving API + client (Phase 4). No GPU needed to import/test these —
 # only actually running vllm (requirements-serve.txt) needs one. ---

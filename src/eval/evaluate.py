@@ -20,13 +20,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 import joblib
+import mlflow
+import mlflow.sklearn
 import yaml
+from mlflow.tracking import MlflowClient
 
 from src.data.schema import Risk, parse_verdict
+
+MLFLOW_EXPERIMENT = "fraud-triage-llm"
+REGISTERED_BASELINE_NAME = "fraud-triage-baseline"
 
 # Markers used by src.data.load.format_example, so we can recover the raw
 # transcript from a formatted prompt without re-touching the dataset.
@@ -200,6 +207,61 @@ def _fmt(metrics: dict) -> str:
     return "  ".join(f"{k}={metrics[k]:.3f}" for k in keys if k in metrics) + f"  (n={metrics['n']})"
 
 
+def _flatten_metrics(report: dict) -> dict[str, float]:
+    """Flatten the nested metrics report into MLflow-loggable {metric_name: value}.
+
+    Pure function (no MLflow import needed to call it) so it's unit-testable
+    on its own. Keys are prefixed id_/crossdomain_ + baseline/llm + the metric
+    name, e.g. "id_baseline_f1", "crossdomain_llm_pr_auc".
+    """
+    flat: dict[str, float] = {}
+    for name, m in (report.get("in_distribution") or {}).items():
+        if not m:
+            continue
+        for k, v in m.items():
+            flat[f"id_{name}_{k}"] = float(v)
+    crossdomain = report.get("crossdomain")
+    if crossdomain:
+        for name in ("baseline", "llm"):
+            m = crossdomain.get(name)
+            if not m:
+                continue
+            for k, v in m.items():
+                flat[f"crossdomain_{name}_{k}"] = float(v)
+    return flat
+
+
+def _git_commit() -> str | None:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, check=True
+        )
+        return out.stdout.strip()
+    except Exception:
+        return None
+
+
+def _maybe_promote_champion(client: MlflowClient, model_name: str, version: str, candidate_f1: float) -> bool:
+    """Alias-based promotion: candidate becomes "champion" if it beats (or
+    there is no) current champion's f1. Returns True if promoted.
+
+    Scoped deliberately narrow — this promotes the classical baseline, which
+    is the only model actually fit inside this harness. Promoting the LLM
+    itself would need its own registered artifact (the QLoRA adapter, logged
+    from src.train.qlora_train — see docs/devlog/phase-4b-mlflow.md for why
+    that side stays code-complete-but-Kaggle-only rather than run here.
+    """
+    try:
+        current = client.get_model_version_by_alias(model_name, "champion")
+        current_f1 = float(client.get_run(current.run_id).data.metrics.get("id_baseline_f1", -1.0))
+    except Exception:
+        current_f1 = -1.0
+    if candidate_f1 >= current_f1:
+        client.set_registered_model_alias(model_name, "champion", version)
+        return True
+    return False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Phase 2 fraud-triage eval harness")
     ap.add_argument("--data", type=Path, default=Path("data/processed"),
@@ -215,6 +277,13 @@ def main() -> int:
                     help="where to persist the fitted TF-IDF+XGBoost baseline")
     ap.add_argument("--metrics-out", type=Path, default=Path("reports/metrics.json"),
                     help="where to write the metrics report (JSON)")
+    ap.add_argument("--register-model", action="store_true",
+                    help="also register the fitted baseline in the MLflow Model Registry and "
+                         "run alias-based promotion against the current 'champion'. Off by "
+                         "default so routine/CI runs (incl. the tiny synthetic CI fixture) "
+                         "don't pollute the registry — opt in for a real evaluation run.")
+    ap.add_argument("--mlflow-experiment", type=str, default=MLFLOW_EXPERIMENT,
+                    help="MLflow experiment name for tracking (params/metrics always logged)")
     args = ap.parse_args()
 
     if args.crossdomain_predictions is not None and args.crossdomain is None:
@@ -278,6 +347,47 @@ def main() -> int:
     args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
     args.metrics_out.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\nSaved baseline -> {args.baseline_out}\nSaved metrics  -> {args.metrics_out}")
+
+    # --- MLflow tracking: always log this run (params/metrics/artifact) so
+    # every evaluation — CI fixture or a real Kaggle-scale run — leaves a
+    # queryable record. Registry write + promotion is opt-in (--register-model)
+    # so routine runs don't create registry versions for a throwaway fixture. ---
+    mlflow.set_experiment(args.mlflow_experiment)
+    with mlflow.start_run():
+        mlflow.log_params(
+            {
+                "data": str(args.data),
+                "crossdomain_data": str(args.crossdomain) if args.crossdomain else None,
+                "min_f1": cfg["min_f1"],
+                "min_pr_auc": cfg["min_pr_auc"],
+                "min_json_validity": cfg["min_json_validity"],
+                "git_commit": _git_commit() or "unknown",
+            }
+        )
+        mlflow.log_metrics(_flatten_metrics(report))
+        mlflow.set_tag("gate_failed", str(failed))
+        mlflow.log_artifact(str(args.metrics_out))
+
+        if args.register_model:
+            # skops (MLflow's default sklearn serialization) refuses to
+            # deserialize types it doesn't recognize by default — a real
+            # safety feature against untrusted-pickle deserialization. The
+            # pipeline only ever contains these two xgboost types, so trust
+            # them explicitly rather than falling back to raw pickle.
+            model_info = mlflow.sklearn.log_model(
+                pipeline,
+                artifact_path="baseline_model",
+                registered_model_name=REGISTERED_BASELINE_NAME,
+                skops_trusted_types=["xgboost.core.Booster", "xgboost.sklearn.XGBClassifier"],
+            )
+            client = MlflowClient()
+            promoted = _maybe_promote_champion(
+                client, REGISTERED_BASELINE_NAME, model_info.registered_model_version, base["f1"]
+            )
+            print(
+                f"Registered {REGISTERED_BASELINE_NAME} v{model_info.registered_model_version}"
+                f" — {'promoted to champion' if promoted else 'not promoted (below current champion)'}"
+            )
 
     return 1 if failed else 0
 
