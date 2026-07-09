@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -302,6 +303,70 @@ def _fraud_ratio(pairs: list[tuple[str, dict]]) -> float:
     return fraud / len(pairs)
 
 
+def _sha256_file(path: Path) -> str:
+    """Hash a file already written to disk, in fixed-size chunks (no need to
+    hold the whole split in memory to fingerprint it)."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git_commit() -> str | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, check=True
+        )
+        return out.stdout.strip()
+    except Exception:
+        return None
+
+
+def build_manifest(
+    dataset: str,
+    split_files: dict[str, Path],
+    split_rows: dict[str, list[tuple[str, dict]]],
+    cfg: dict,
+) -> dict:
+    """A lightweight, dependency-free stand-in for a full DVC pipeline: an
+    immutable record of exactly what was generated and from what config, so a
+    later run (or a different machine) can tell whether it reproduced the
+    same data. Reads back each already-written split file to hash it, so the
+    manifest reflects what's actually on disk, not just what main() thinks it
+    wrote.
+    """
+    return {
+        "dataset": dataset,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": _git_commit(),
+        "config_snapshot": {
+            "test_size": cfg["data"]["test_size"],
+            "val_size": cfg["data"]["val_size"],
+            "seed": cfg["train"]["seed"],
+        },
+        "splits": {
+            name: {
+                "path": str(split_files[name]),
+                "n": len(rows),
+                "fraud_ratio": _fraud_ratio(rows),
+                "sha256": _sha256_file(split_files[name]),
+            }
+            for name, rows in split_rows.items()
+        },
+    }
+
+
+def write_manifest(out_dir: Path, manifest: dict) -> Path:
+    path = out_dir / "manifest.json"
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return path
+
+
 def main() -> None:
     # Deferred: only main()'s train/val/test re-split needs scikit-learn, and
     # deferring it keeps format_prompt/format_example importable (e.g. by
@@ -329,7 +394,10 @@ def main() -> None:
     # Eval-only datasets (DIFRAUD) are never trained on: no re-split, just write
     # the held-out cross-domain test set the eval harness reads via --crossdomain.
     if args.dataset in EVAL_ONLY:
-        _write_jsonl(args.out / "test.jsonl", pairs)
+        test_path = args.out / "test.jsonl"
+        _write_jsonl(test_path, pairs)
+        manifest = build_manifest(args.dataset, {"test": test_path}, {"test": pairs}, cfg)
+        write_manifest(args.out, manifest)
         print(
             f"Wrote eval-only test split to {args.out} "
             f"(dataset={args.dataset}, n={len(pairs)}, fraud_ratio={_fraud_ratio(pairs):.3f})"
@@ -349,8 +417,12 @@ def main() -> None:
     )
 
     splits = {"train": train, "val": val, "test": test}
+    split_files = {name: args.out / f"{name}.jsonl" for name in splits}
     for name, rows in splits.items():
-        _write_jsonl(args.out / f"{name}.jsonl", rows)
+        _write_jsonl(split_files[name], rows)
+
+    manifest = build_manifest(args.dataset, split_files, splits, cfg)
+    write_manifest(args.out, manifest)
 
     print(f"Wrote splits to {args.out} (dataset={args.dataset}, total={len(pairs)}):")
     for name, rows in splits.items():

@@ -6,12 +6,17 @@ import json
 import pytest
 
 from src.data.load import (
+    _fraud_ratio,
     _scam_type_to_fraudtype,
+    _sha256_file,
+    _write_jsonl,
     bothbosu_row_to_verdict,
+    build_manifest,
     call_row_to_verdict,
     clair_row_to_verdict,
     difraud_row_to_verdict,
     format_example,
+    write_manifest,
 )
 from src.data.schema import FraudType, Risk, parse_verdict
 
@@ -110,3 +115,56 @@ def test_format_example_completion_round_trips_through_schema():
     assert parsed is not None
     assert parsed.fraud_type == FraudType.refund_scam
     json.loads(ex["completion"])  # completion is strict JSON, not prose-wrapped
+
+
+# --- Dataset manifest / lineage (no network, no git required to pass) ---
+
+_FRAUD_PAIR = ("scam transcript", bothbosu_row_to_verdict(
+    {"dialogue": "scam transcript", "type": "refund", "label": 1}
+).model_dump(mode="json"))
+_LEGIT_PAIR = ("legit transcript", bothbosu_row_to_verdict(
+    {"dialogue": "legit transcript", "type": "delivery", "label": 0}
+).model_dump(mode="json"))
+
+
+def test_sha256_file_matches_known_content(tmp_path):
+    import hashlib
+
+    path = tmp_path / "f.txt"
+    path.write_bytes(b"hello world")
+    assert _sha256_file(path) == hashlib.sha256(b"hello world").hexdigest()
+
+
+def test_build_manifest_records_counts_ratio_and_matching_hash(tmp_path):
+    rows = [_FRAUD_PAIR, _LEGIT_PAIR]
+    path = tmp_path / "test.jsonl"
+    _write_jsonl(path, rows)
+
+    cfg = {"data": {"test_size": 0.15, "val_size": 0.10}, "train": {"seed": 42}}
+    manifest = build_manifest("bothbosu", {"test": path}, {"test": rows}, cfg)
+
+    assert manifest["dataset"] == "bothbosu"
+    assert manifest["config_snapshot"] == {"test_size": 0.15, "val_size": 0.10, "seed": 42}
+    assert manifest["splits"]["test"]["n"] == 2
+    assert manifest["splits"]["test"]["fraud_ratio"] == 0.5
+    assert manifest["splits"]["test"]["sha256"] == _sha256_file(path)
+    assert manifest["splits"]["test"]["path"] == str(path)
+    # generated_at / git_commit are environment-dependent; just assert presence.
+    assert "generated_at" in manifest
+    assert "git_commit" in manifest
+
+
+def test_write_manifest_round_trips_as_json(tmp_path):
+    manifest = {"dataset": "bothbosu", "splits": {"test": {"n": 2}}}
+    path = write_manifest(tmp_path, manifest)
+    assert path == tmp_path / "manifest.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == manifest
+
+
+def test_build_manifest_empty_split_has_zero_fraud_ratio(tmp_path):
+    path = tmp_path / "empty.jsonl"
+    _write_jsonl(path, [])
+    cfg = {"data": {"test_size": 0.15, "val_size": 0.10}, "train": {"seed": 42}}
+    manifest = build_manifest("bothbosu", {"test": path}, {"test": []}, cfg)
+    assert manifest["splits"]["test"]["n"] == 0
+    assert manifest["splits"]["test"]["fraud_ratio"] == 0.0
