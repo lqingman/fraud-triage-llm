@@ -92,10 +92,20 @@ CALL_SOURCES = (
 )
 
 
+def format_prompt(transcript: str) -> str:
+    """The exact prompt template used at both training and inference time.
+
+    Shared by format_example (training/eval data) and src.serve.app (live
+    serving) so the two can never drift apart — a serving prompt that differs
+    from the training prompt would silently change model behavior.
+    """
+    return f"{SYSTEM_PROMPT}\n\nTranscript:\n{transcript}\n\nVerdict:"
+
+
 def format_example(transcript: str, verdict_json: dict) -> dict:
     """Render one (prompt, completion) instruction pair."""
     return {
-        "prompt": f"{SYSTEM_PROMPT}\n\nTranscript:\n{transcript}\n\nVerdict:",
+        "prompt": format_prompt(transcript),
         "completion": json.dumps(verdict_json, ensure_ascii=False),
     }
 

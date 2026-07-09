@@ -1,11 +1,13 @@
 # Serving deps (Phase 4) — Linux + NVIDIA GPU only (Docker image).
-# vllm has no Windows wheel; build/run these inside src/serve/Dockerfile.
+# vllm/faster-whisper have no Windows wheel; build/run these inside
+# src/serve/Dockerfile. fastapi/httpx are cross-platform and live in
+# requirements-base.txt (inherited below) so the serving unit tests run
+# locally/CI without a GPU; only actually running vllm needs one.
 #   pip install -r requirements-base.txt -r requirements-serve.txt
 
 -r requirements-base.txt
 
-# --- API + inference ---
-fastapi>=0.111
+# --- Inference server + demo UI ---
 uvicorn[standard]>=0.30
 vllm>=0.5             # GPU inference server
 gradio>=4.0          # demo UI

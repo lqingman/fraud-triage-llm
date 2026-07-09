@@ -2,24 +2,51 @@
 
 Two endpoints:
   POST /triage/text   {transcript}      -> FraudVerdict
-  POST /triage/audio  (file upload)     -> FraudVerdict   (Whisper -> LLM)
+  POST /triage/audio  (file upload)     -> FraudVerdict   (Whisper -> LLM, still
+                                                            Phase 3 scaffolding —
+                                                            see src/asr/transcribe.py)
 
-Backed by vLLM for the LLM (continuous batching). Includes structured request
-logging + a /metrics endpoint for observability.
+The text path is fully wired: src.serve.llm_client talks to an
+OpenAI-compatible completions endpoint (a real vLLM server, or anything else
+that speaks the same protocol), and src.serve.guardrails.safe_generate
+retries and falls back to a safe verdict on a parse failure or a downed
+backend.
 
-TODO(Phase 4):
-  - wire vLLM engine (or an OpenAI-compatible vLLM server) as `generate`
-  - wrap generation with guardrails.safe_generate
-  - add latency logging (p50/p95) and a /metrics endpoint
+Privacy note: request logs carry a correlation id, method, path, status, and
+latency — never the transcript or uploaded file content.
 """
 
 from __future__ import annotations
 
-from fastapi import FastAPI, UploadFile
+import logging
+import time
+import uuid
+from pathlib import Path
+
+import yaml
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
+from src.data.load import format_prompt
 from src.data.schema import FraudVerdict
+from src.serve import llm_client
 from src.serve.guardrails import safe_generate
+
+logger = logging.getLogger("fraud_triage")
+
+CONFIG_PATH = Path("config/config.yaml")
+
+
+def _load_serve_config() -> dict:
+    try:
+        cfg = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+        return cfg.get("serve", {})
+    except FileNotFoundError:
+        return {}
+
+
+_SERVE_CFG = _load_serve_config()
+MAX_TRANSCRIPT_CHARS = _SERVE_CFG.get("max_transcript_chars", 20000)
 
 app = FastAPI(title="Fraud-Triage-LLM")
 
@@ -28,8 +55,30 @@ class TextRequest(BaseModel):
     transcript: str
 
 
-def _generate(prompt: str) -> str:  # TODO(Phase 4): replace with vLLM call
-    raise NotImplementedError("Phase 4: connect vLLM engine")
+@app.middleware("http")
+async def _request_logging(request: Request, call_next):
+    correlation_id = uuid.uuid4().hex
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_s = time.perf_counter() - start
+
+    # Structured, privacy-aware: correlation id + metadata only, never body content.
+    logger.info(
+        "request",
+        extra={
+            "correlation_id": correlation_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": round(duration_s * 1000, 2),
+        },
+    )
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
+
+
+def _generate(prompt: str) -> str:
+    return llm_client.complete(prompt)
 
 
 @app.get("/health")
@@ -37,13 +86,27 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/ready")
+def ready() -> Response:
+    if llm_client.is_healthy():
+        return Response(content='{"status":"ready"}', media_type="application/json", status_code=200)
+    return Response(
+        content='{"status":"backend unreachable"}', media_type="application/json", status_code=503
+    )
+
+
 @app.post("/triage/text", response_model=FraudVerdict)
 def triage_text(req: TextRequest) -> FraudVerdict:
-    return safe_generate(_generate, req.transcript)
+    if len(req.transcript) > MAX_TRANSCRIPT_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"transcript exceeds max_transcript_chars ({MAX_TRANSCRIPT_CHARS})",
+        )
+    prompt = format_prompt(req.transcript)
+    return safe_generate(_generate, prompt)
 
 
 @app.post("/triage/audio", response_model=FraudVerdict)
 async def triage_audio(file: UploadFile) -> FraudVerdict:
     # from src.asr.transcribe import transcribe
-    # transcript = transcribe(saved_path)
-    raise NotImplementedError("Phase 3+4: Whisper -> LLM path")
+    raise NotImplementedError("Phase 3+4: Whisper -> LLM path (see src/asr/transcribe.py)")

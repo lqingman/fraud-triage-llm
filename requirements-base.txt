@@ -1,5 +1,7 @@
-# Base deps — light, cross-platform. Everything needed locally for
-# Phase 0 (data) and Phase 2 (eval). No GPU / no platform-specific wheels.
+# Base deps — light, cross-platform, no GPU / no platform-specific wheels.
+# Everything needed locally for Phase 0 (data), Phase 2 (eval), and Phase 4's
+# FastAPI serving layer + guardrails (unit-testable without a GPU or a
+# running vLLM server).
 #   pip install -r requirements-base.txt
 
 # --- Data loading (Phase 0) ---
@@ -13,6 +15,12 @@ scikit-learn>=1.5
 xgboost>=2.1          # classical baseline for comparison
 pandas>=2.2
 numpy>=1.26
+
+# --- Serving API + client (Phase 4). No GPU needed to import/test these —
+# only actually running vllm (requirements-serve.txt) needs one. ---
+fastapi>=0.111
+httpx>=0.27            # HTTP client to an OpenAI-compatible vLLM server
+python-multipart>=0.0.9  # required by FastAPI's UploadFile (audio endpoint)
 
 # --- Dev ---
 pytest>=8.0
