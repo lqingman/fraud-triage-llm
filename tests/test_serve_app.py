@@ -1,14 +1,17 @@
-"""Phase 4 serving tests — FastAPI TestClient + a stubbed llm_client, no
-network/GPU/real vLLM server. Exercises the full request path: guardrails,
-privacy-safe logging, size limits, /ready, and Prometheus /metrics."""
+"""Phase 4 serving tests — FastAPI TestClient + a stubbed llm_client/ASR, no
+network/GPU/real vLLM server or Whisper model. Exercises the full request
+path: guardrails, privacy-safe logging, size limits, /ready, Prometheus
+/metrics, and the audio path's transcribe-then-triage + temp-file cleanup."""
 
 import logging
+import os
 
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
 
+import src.serve.app as app_module
 from src.serve import llm_client
-from src.serve.app import MAX_TRANSCRIPT_CHARS, app
+from src.serve.app import MAX_AUDIO_BYTES, MAX_TRANSCRIPT_CHARS, app
 
 client = TestClient(app)
 
@@ -106,3 +109,61 @@ def test_malformed_output_increments_invalid_output_counter(monkeypatch):
     after = REGISTRY.get_sample_value("triage_invalid_output_total")
     # MAX_RETRIES + 1 failed parse attempts per request (guardrails retries).
     assert after > before
+
+
+def test_triage_audio_happy_path(monkeypatch):
+    monkeypatch.setattr(app_module, "asr_transcribe", lambda path, model_size: "You've won a free prize!")
+    monkeypatch.setattr(llm_client, "complete", lambda prompt, **kw: _FRAUD_JSON)
+    resp = client.post("/triage/audio", files={"file": ("call.wav", b"fake-audio-bytes", "audio/wav")})
+    assert resp.status_code == 200
+    assert resp.json()["risk"] == "high"
+
+
+def test_triage_audio_empty_file_rejected():
+    resp = client.post("/triage/audio", files={"file": ("call.wav", b"", "audio/wav")})
+    assert resp.status_code == 422
+
+
+def test_triage_audio_oversized_file_rejected(monkeypatch):
+    monkeypatch.setattr(app_module, "MAX_AUDIO_BYTES", 10)
+    resp = client.post("/triage/audio", files={"file": ("call.wav", b"x" * 100, "audio/wav")})
+    assert resp.status_code == 422
+
+
+def test_triage_audio_default_size_limit_is_reasonable():
+    assert MAX_AUDIO_BYTES > 0
+
+
+def test_triage_audio_transcription_failure_returns_422_not_500(monkeypatch):
+    def raising(path, model_size):
+        raise RuntimeError("corrupt audio")
+
+    monkeypatch.setattr(app_module, "asr_transcribe", raising)
+    resp = client.post("/triage/audio", files={"file": ("call.wav", b"fake-audio-bytes", "audio/wav")})
+    assert resp.status_code == 422
+
+
+def test_triage_audio_cleans_up_temp_file_even_on_failure(monkeypatch):
+    captured = {}
+
+    def fake_transcribe(path, model_size):
+        captured["path"] = path
+        assert os.path.exists(path)  # temp file exists while transcribing
+        raise RuntimeError("simulated ASR failure")
+
+    monkeypatch.setattr(app_module, "asr_transcribe", fake_transcribe)
+    resp = client.post("/triage/audio", files={"file": ("call.wav", b"fake-audio-bytes", "audio/wav")})
+    assert resp.status_code == 422
+    assert "path" in captured
+    assert not os.path.exists(captured["path"])  # cleaned up despite the failure
+
+
+def test_triage_audio_never_logs_filename_or_content(monkeypatch, caplog):
+    monkeypatch.setattr(app_module, "asr_transcribe", lambda path, model_size: "hello")
+    monkeypatch.setattr(llm_client, "complete", lambda prompt, **kw: _FRAUD_JSON)
+    secret_filename = "super-secret-caller-name.wav"
+    with caplog.at_level(logging.INFO):
+        client.post("/triage/audio", files={"file": (secret_filename, b"fake-audio-bytes", "audio/wav")})
+    for record in caplog.records:
+        assert secret_filename not in record.getMessage()
+        assert secret_filename not in str(record.__dict__)

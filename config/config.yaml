@@ -44,6 +44,7 @@ serve:
   host: "0.0.0.0"
   port: 8000
   max_transcript_chars: 20000   # reject oversized /triage/text requests with 422
+  max_audio_bytes: 26214400     # 25 MiB; reject oversized /triage/audio uploads with 422
 
 eval:
   # CI fails the build if these regress below threshold. These are regression

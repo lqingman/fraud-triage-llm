@@ -25,12 +25,12 @@ xgboost>=2.1          # classical baseline for comparison
 pandas>=2.2
 numpy>=1.26
 
-# --- ASR frontend (Phase 3) ---
+# --- ASR frontend (Phase 3). CPU + int8 — no GPU needed. ---
 faster-whisper>=1.0   # off-the-shelf; we do NOT train this
 
-# --- Serving (Phase 4) — fastapi/httpx/prometheus-client are cross-platform,
-# CPU-only, and unit-tested without a GPU; uvicorn/vllm/gradio need Linux+GPU
-# to actually run (see requirements-serve.txt) ---
+# --- Serving (Phase 4) — fastapi/httpx/prometheus-client/faster-whisper are
+# cross-platform, CPU-only, and unit-tested without a GPU; uvicorn/vllm/gradio
+# need Linux+GPU to actually run (see requirements-serve.txt) ---
 fastapi>=0.111
 httpx>=0.27
 prometheus-client>=0.20
