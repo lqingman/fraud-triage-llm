@@ -1,0 +1,55 @@
+# Phase 4d — build the serving image, scan it for vulnerabilities, and smoke
+# test it (run the container, probe /health and /ready, tear down). This is
+# the CI-appropriate stand-in for "deployment validation" in a repo with no
+# actual cloud target: it proves the built artifact starts and serves
+# correctly, not that it was pushed somewhere. See docs/devlog/phase-4d-docker.md.
+
+name: docker
+
+on: [push, pull_request]
+
+jobs:
+  build-scan-smoketest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build serving image
+        run: docker build -f src/serve/Dockerfile -t fraud-triage-llm-api:ci .
+
+      - name: Scan image with Trivy (fails on fixable CRITICAL/HIGH CVEs)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: fraud-triage-llm-api:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Smoke test — run, probe, teardown
+        run: |
+          docker run -d --name smoketest -p 8000:8000 fraud-triage-llm-api:ci
+
+          ready=0
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8000/health >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "container never became healthy"
+            docker logs smoketest
+            exit 1
+          fi
+
+          curl -sf http://localhost:8000/health
+
+          # No real vLLM backend is configured in this smoke test, so /ready
+          # correctly reporting 503 (not 200, not a crash) IS the pass condition.
+          ready_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ready)
+          if [ "$ready_code" != "503" ]; then
+            echo "expected /ready -> 503 with no backend configured, got $ready_code"
+            docker logs smoketest
+            exit 1
+          fi
+
+          docker stop smoketest
+          docker rm smoketest

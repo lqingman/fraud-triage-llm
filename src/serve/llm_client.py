@@ -76,11 +76,18 @@ def complete(prompt: str, max_new_tokens: int = 96) -> str:
 
 
 def is_healthy() -> bool:
-    """Best-effort backend reachability check for the /ready probe."""
+    """Best-effort backend reachability check for the /ready probe.
+
+    Requires exactly 200, not merely "not a 5xx" — a 404 (e.g. hitting a
+    server that doesn't expose /v1/models, like this app's own default
+    VLLM_BASE_URL pointed at itself when no real backend is configured) would
+    otherwise slip through as a false-positive "ready". Caught during real
+    container testing (see docs/devlog/phase-4d-docker.md).
+    """
     import httpx
 
     try:
         resp = httpx.get(f"{_base_url()}/models", timeout=5.0)
-        return resp.status_code < 500
+        return resp.status_code == 200
     except httpx.HTTPError:
         return False

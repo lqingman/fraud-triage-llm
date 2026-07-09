@@ -1,0 +1,22 @@
+# Lightweight serving-image deps (src/serve/Dockerfile) — CPU-only, no GPU,
+# no vllm/torch. This image runs FastAPI + guardrails + ASR + Prometheus and
+# talks to a real vLLM inference server over HTTP (VLLM_BASE_URL); the GPU
+# inference server is a separate deployable unit (in production, run from
+# vLLM's own official image), not something built into this image.
+#
+# Deliberately standalone rather than `-r requirements-base.txt`: that file
+# also pulls in xgboost/pandas/datasets/mlflow for Phase 0/2/MLflow, none of
+# which src/serve/app.py's import chain needs, and xgboost's wheel drags in
+# ~300MB of nvidia-nccl-cu12 it doesn't use on CPU. Listing only what serving
+# actually imports keeps this image an order of magnitude smaller and cuts
+# the CVE surface Trivy has to scan.
+#   pip install -r requirements-docker.txt
+
+pydantic>=2.7
+pyyaml>=6.0
+fastapi>=0.111
+httpx>=0.27
+prometheus-client>=0.20
+python-multipart>=0.0.9
+faster-whisper>=1.0
+uvicorn[standard]>=0.30

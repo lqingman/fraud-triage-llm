@@ -17,7 +17,6 @@ import json
 from pathlib import Path
 
 import yaml
-from sklearn.model_selection import train_test_split
 
 from src.data.schema import FraudType, FraudVerdict, Risk
 
@@ -304,6 +303,13 @@ def _fraud_ratio(pairs: list[tuple[str, dict]]) -> float:
 
 
 def main() -> None:
+    # Deferred: only main()'s train/val/test re-split needs scikit-learn, and
+    # deferring it keeps format_prompt/format_example importable (e.g. by
+    # src.serve.app, which never re-splits data) without scikit-learn
+    # installed — matches the heavy-import-deferral convention used elsewhere
+    # in this codebase (src/train/qlora_train.py, src/eval/evaluate.py).
+    from sklearn.model_selection import train_test_split
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", choices=LOADERS, required=True)
     ap.add_argument("--out", type=Path, default=Path("data/processed"))
