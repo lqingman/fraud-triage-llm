@@ -1,0 +1,8 @@
+{"prediction": "{\"risk\": \"medium\", \"fraud_type\": \"reward_scam\", \"reason\": \"Caller offers a free prize but requests card details for a deposit.\", \"flagged_spans\": [\"free vacation package\", \"provide your credit card for a refundable deposit\"]}"}
+{"prediction": "{\"risk\": \"medium\", \"fraud_type\": \"other\", \"reason\": \"Caller pressures with an urgent warranty expiration and asks for payment details.\", \"flagged_spans\": [\"extended car warranty\", \"provide your VIN and payment method\"]}"}
+{"prediction": "{\"risk\": \"low\", \"fraud_type\": \"none\", \"reason\": \"No fraud indicators; appears to be a legitimate utility shutoff notice.\", \"flagged_spans\": []}"}
+{"prediction": "{\"risk\": \"low\", \"fraud_type\": \"none\", \"reason\": \"No fraud indicators; appears to be a legitimate accountant appointment reminder.\", \"flagged_spans\": []}"}
+{"prediction": "{\"risk\": \"low\", \"fraud_type\": \"none\", \"reason\": \"No fraud indicators; appears to be a legitimate coworker call.\", \"flagged_spans\": []}"}
+{"prediction": "{\"risk\": \"low\", \"fraud_type\": \"none\", \"reason\": \"No fraud indicators; appears to be a legitimate vet appointment reminder.\", \"flagged_spans\": []}"}
+{"prediction": "{\"risk\": \"low\", \"fraud_type\": \"none\", \"reason\": \"No fraud indicators; appears to be a legitimate airline check-in notice.\", \"flagged_spans\": []}"}
+{"prediction": "{\"risk\": \"low\", \"fraud_type\": \"none\", \"reason\": \"No fraud indicators; appears to be a legitimate dental reminder duplicate style.\", \"flagged_spans\": []}"}

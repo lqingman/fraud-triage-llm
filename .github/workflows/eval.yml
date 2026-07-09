@@ -1,7 +1,14 @@
-# Phase 5 — CI. Schema tests run on every push. The eval-regression gate runs
-# when evaluation artifacts are present, and FAILS the build if F1 / PR-AUC /
-# JSON-validity drop below config/config.yaml thresholds. This "model
-# regression test" is the part most portfolio projects lack.
+# Phase 5 — CI. Every push/PR runs the full pytest suite (schema, data,
+# training helpers, eval metrics, serving/guardrails, MLflow) plus an
+# eval-regression gate against a committed synthetic fixture
+# (tests/fixtures/ci_eval/), which FAILS the build if F1 / PR-AUC /
+# JSON-validity drop below config/config.yaml thresholds.
+#
+# Scope note: this gate proves the mechanism runs on every push — it does not
+# re-derive the real model's headline numbers (0.941 F1 / 0.937 PR-AUC), since
+# those require a GPU + the trained adapter, which don't exist in CI. That
+# real result is a manually-verified Kaggle artifact (reports/metrics.json).
+# See docs/devlog/phase-5-ci-gate.md.
 
 name: eval
 
@@ -17,13 +24,13 @@ jobs:
           python-version: "3.11"
       - name: Install (lightweight, CPU-only for CI)
         run: |
-          pip install pydantic pyyaml pytest scikit-learn pandas numpy
-      - name: Schema tests
+          pip install -r requirements-base.txt
+      - name: Full test suite
         run: pytest -q
-      - name: Eval-regression gate
+      - name: Eval-regression gate (synthetic CI fixture)
         run: |
-          if [ -f data/eval/predictions.jsonl ]; then
-            python -m src.eval.evaluate   # exits non-zero if below thresholds
-          else
-            echo "No eval artifacts yet — skipping gate (Phase 2 not run)."
-          fi
+          python -m src.eval.evaluate \
+            --data tests/fixtures/ci_eval \
+            --predictions tests/fixtures/ci_eval/predictions.jsonl \
+            --metrics-out /tmp/ci_metrics.json \
+            --baseline-out /tmp/ci_baseline.joblib
