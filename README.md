@@ -119,12 +119,26 @@ Every prediction is validated against `src/data/schema.py`:
 
 ## Quickstart
 
+macOS / Linux:
+
 ```bash
-python -m venv .venv && .venv\Scripts\activate   # Windows
-pip install -r requirements-base.txt              # light, cross-platform (Phase 0, 2, 4 unit tests, MLflow, ASR)
-pytest                                            # 93 tests: schema, data, eval, serving, guardrails, ASR, drift, MLflow
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-base.txt    # light, cross-platform (Phase 0, 2, 4 unit tests, MLflow, ASR)
+python -m pytest                                  # 93 tests: schema, data, eval, serving, guardrails, ASR, drift, MLflow
 python -m src.data.load --dataset bothbosu --out data/processed   # Phase 0 (writes a manifest.json too)
-uvicorn src.serve.app:app --reload                # Phase 4: serve locally (falls back to a safe verdict with no backend configured)
+python -m uvicorn src.serve.app:app --reload      # Phase 4: serve locally
+```
+
+Windows PowerShell:
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-base.txt
+python -m pytest
+python -m src.data.load --dataset bothbosu --out data/processed
+python -m uvicorn src.serve.app:app --reload
 ```
 
 `requirements-base.txt` now also covers the FastAPI serving layer, guardrails,
@@ -135,11 +149,51 @@ real vLLM inference server (Phase 4, GPU) uses Docker
 (`requirements-serve.txt`). Both pull `vllm`/`bitsandbytes`, which have no
 Windows wheels — keep them off local installs.
 
-By default there's no LLM backend configured, so `/triage/text` and
+The QLoRA adapter produced by the Kaggle training run is the model artifact
+this service is intended to use. The adapter weights are gitignored and are
+not automatically available to the local API: download the Kaggle output
+directory (`models/qwen7b-fraud-qlora`) and serve it together with the
+`Qwen/Qwen2.5-7B-Instruct` base model from a GPU inference host.
+
+Until an LLM backend is running and configured, `/triage/text` and
 `/triage/audio` return the guardrails' safe fallback verdict (`risk=medium`)
-instead of erroring — that's the intended behavior, not a bug. Point
+instead of erroring — that's the intended behavior, not evidence that the
+model was not trained. Point
 `VLLM_BASE_URL` (default `http://localhost:8000/v1`) at a real
 OpenAI-compatible vLLM server to get real verdicts:
+
+```bash
+export VLLM_BASE_URL=http://your-gpu-host:8000/v1
+export VLLM_MODEL=qwen2.5-7b-fraud-qlora
+export VLLM_TIMEOUT_S=30
+python -m uvicorn src.serve.app:app --reload
+```
+
+The FastAPI service and vLLM backend are separate processes. If both run on
+the same machine, give them different ports (for example FastAPI on `8000`
+and vLLM on `8001`) and set `VLLM_BASE_URL=http://127.0.0.1:8001/v1`.
+
+On a Linux/NVIDIA GPU host, serve the downloaded Kaggle adapter under the
+same model name expected by `src/serve/llm_client.py`:
+
+```bash
+python -m pip install -r requirements-serve.txt
+vllm serve Qwen/Qwen2.5-7B-Instruct \
+  --host 0.0.0.0 \
+  --port 8001 \
+  --enable-lora \
+  --max-lora-rank 16 \
+  --lora-modules qwen2.5-7b-fraud-qlora=/absolute/path/to/models/qwen7b-fraud-qlora
+
+curl http://127.0.0.1:8001/v1/models
+```
+
+The adapter directory should contain at least `adapter_config.json`, the
+adapter weights (normally `adapter_model.safetensors`), and the tokenizer
+files saved by the training script. vLLM exposes the LoRA module name as a
+model ID, so `VLLM_MODEL=qwen2.5-7b-fraud-qlora` selects the fine-tuned
+adapter rather than the untouched base model. See the
+[vLLM LoRA serving guide](https://docs.vllm.ai/en/stable/features/lora/).
 
 ```bash
 curl -X POST http://127.0.0.1:8000/triage/text \

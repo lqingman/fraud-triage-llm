@@ -28,6 +28,7 @@ fastapi>=0.111
 httpx>=0.27            # HTTP client to an OpenAI-compatible vLLM server
 prometheus-client>=0.20
 python-multipart>=0.0.9  # required by FastAPI's UploadFile (audio endpoint)
+uvicorn[standard]>=0.30  # local FastAPI development server
 
 # --- ASR frontend (Phase 3). CPU + int8 quantization — no GPU needed; only
 # QLoRA training itself requires one. ---
