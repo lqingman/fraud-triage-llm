@@ -1,6 +1,6 @@
 # Fraud-Triage-LLM
 
-Production-oriented telecom-fraud triage: **call transcript → fine-tuned LLM → structured, explainable fraud verdict**. The completed pipeline covers data preparation with lineage tracking, QLoRA training, deterministic inference, evaluation with a CI regression gate, a FastAPI text-and-audio triage service (real CPU Whisper transcription) with retry/fallback guardrails, a scanned/smoke-tested Docker image, Prometheus metrics with PSI-based drift detection visualized in Grafana, real load-test numbers, and MLflow experiment tracking on the eval side. A live GPU/vLLM deployment and any actual running/cloud deployment remain roadmap work — everything above has been built and verified locally or in CI, not deployed anywhere.
+Production-oriented telecom-fraud triage: **call transcript → validated batch/stream pipeline → fine-tuned LLM → structured, explainable fraud verdict**. The completed pipeline covers data contracts with privacy-safe quarantine, lineage tracking, a versioned SQLite offline feature store, durable micro-batch event ingestion, QLoRA training, deterministic inference, evaluation with a multi-signal CI promotion gate, a FastAPI text-and-audio triage service (real CPU Whisper transcription) with retry/fallback guardrails, a scanned/smoke-tested Docker image, Prometheus metrics with PSI-based drift detection visualized in Grafana, real load-test numbers, and MLflow experiment tracking on the eval side. A live GPU/vLLM deployment and any actual running/cloud deployment remain roadmap work — everything above has been built and verified locally or in CI, not deployed anywhere.
 
 Rather than returning only a binary label, the model emits a schema-validated analyst-style verdict with risk level, fraud type, rationale, and supporting transcript spans. The evaluation suite compares it with a TF-IDF/XGBoost control so the accuracy, reliability, and explainability trade-offs are visible rather than assumed.
 
@@ -9,8 +9,10 @@ Rather than returning only a binary label, the model emits a schema-validated an
 **Fraud-Triage-LLM | Python, PyTorch, Hugging Face, QLoRA/PEFT, XGBoost, FastAPI, Docker, MLflow, Prometheus, Grafana, Locust, Pydantic, pytest, GitHub Actions**
 
 - Built a modular Python ML pipeline that transforms English call transcripts into schema-validated fraud risk, fraud type, rationale, and supporting evidence; prepared an approximately 9,000-transcript corpus with reproducible train/validation/test splits and a generated lineage manifest (SHA-256 hashes, git commit, config snapshot) for every run (see [phase-0e-dataset-manifest](docs/devlog/phase-0e-dataset-manifest.md)).
+- Added a DataOps quality gate that validates transcript and label contracts, removes duplicates, quarantines rejected rows using privacy-safe SHA-256 fingerprints, and records quality SLIs in each immutable manifest; materialized deterministic transcript features into a normalized, indexed SQLite offline store with dataset-version keys and idempotent upserts (see [phase-0f-dataops-feature-store](docs/devlog/phase-0f-dataops-feature-store.md)).
+- Implemented a broker-shaped micro-batch ingestion layer with partition offsets, atomic checkpoints, event-id deduplication, privacy-safe dead letters, and append-only restart semantics; added a fail-closed promotion policy combining F1, PR-AUC, JSON validity, p95 latency, error rate, and Responsible AI evidence in CI (see [phase-0g-streaming](docs/devlog/phase-0g-streaming.md) and [phase-5b-promotion-policy](docs/devlog/phase-5b-promotion-policy.md)).
 - Fine-tuned Qwen2.5-7B-Instruct with 4-bit QLoRA on a single 16 GB T4 GPU using completion-only loss, gradient checkpointing, and deterministic inference, achieving **0.941 F1**, **0.937 PR-AUC**, and **94.7% valid JSON** on 1,350 held-out calls; the same fine-tuned model generalizes to an out-of-domain fraud-email set (CLAIR) at **0.803 F1** versus a call-trained TF-IDF/XGBoost baseline's **0.578 F1**.
-- Developed an evaluation and reliability harness with a TF-IDF/XGBoost baseline, out-of-domain fraud-email testing, Pydantic output contracts, regression thresholds, and **93 unit tests**; a committed synthetic fixture makes the CI regression gate run unconditionally on every push (it previously pointed at a path that never existed and silently skipped — see [phase-5-ci-gate](docs/devlog/phase-5-ci-gate.md)).
+- Developed an evaluation and reliability harness with a TF-IDF/XGBoost baseline, out-of-domain fraud-email testing, Pydantic output contracts, executable Responsible AI checks, regression thresholds, and **106 unit tests**; committed synthetic fixtures make the CI regression and promotion gates run unconditionally on every push (see [phase-5-ci-gate](docs/devlog/phase-5-ci-gate.md)).
 - Built a FastAPI text-**and-audio** triage service — real CPU `faster-whisper` transcription verified against synthesized scam-call audio, a pluggable OpenAI-compatible (vLLM-style) LLM client, retry/fallback guardrails that degrade malformed output or a downed backend to a safe verdict, and privacy-aware structured logging — packaged into a Docker image that's built, Trivy-scanned (fixed real CVEs found on the first scan), and smoke-tested via GitHub Actions (no GPU/vLLM server in this dev environment to run it against a live model; see [phase-3-whisper](docs/devlog/phase-3-whisper.md), [phase-4-serving](docs/devlog/phase-4-serving.md), [phase-4d-docker](docs/devlog/phase-4d-docker.md)).
 - Instrumented the service with Prometheus request/latency/invalid-output metrics and PSI-based fraud-rate drift detection, visualized through a provisioned Grafana dashboard, and load-tested with Locust (**38 req/s, p95 17ms** under 20 concurrent users against the guardrails path with no backend attached) (see [phase-4c-prometheus](docs/devlog/phase-4c-prometheus.md), [phase-4f-drift](docs/devlog/phase-4f-drift.md), [phase-4g-grafana](docs/devlog/phase-4g-grafana.md), [phase-4e-load-test](docs/devlog/phase-4e-load-test.md)).
 - Added MLflow experiment tracking and alias-based Model Registry promotion on the evaluation side (params, metrics, and artifacts logged on every run, no GPU required); the training-side integration is code-complete but only exercised on Kaggle (see [phase-4b-mlflow](docs/devlog/phase-4b-mlflow.md)).
@@ -24,7 +26,9 @@ Scam call audio
    │  faster-whisper, CPU (verified on real audio)   src/asr/
    ▼
 Transcript
-   │  QLoRA-fine-tuned 7B LLM                        src/train/  src/serve/
+   ├── offline data: contract → quarantine → features  src/data/  src/features/
+   ├── telemetry: micro-batch → checkpoint + DLQ       src/data/stream.py
+   └── inference prompt → QLoRA-fine-tuned 7B LLM      src/train/  src/serve/
    ▼
 Structured verdict (JSON):
    { risk, fraud_type, reason, flagged_spans }
@@ -86,7 +90,9 @@ Every prediction is validated against `src/data/schema.py`:
 - [ ] Log the LoRA adapter, tokenizer, evaluation report, and model card for every candidate run (adapter/tokenizer logging code is written but unexercised — no GPU training run since it was added).
 - [x] Register promoted model versions in the MLflow Model Registry with alias-based promotion (`--register-model`) — currently scoped to the classical baseline; the LLM adapter isn't registered yet.
 - [x] Add immutable dataset manifests to reproduce the exact training and evaluation splits — a lightweight, dependency-free stand-in for full DVC: SHA-256 per split, git commit, config snapshot, generated on every `python -m src.data.load` run and verified against a real HF download ([phase-0e-dataset-manifest](docs/devlog/phase-0e-dataset-manifest.md)). Not full DVC — no remote storage, no retained historical versions.
-- [ ] Define a full promotion policy based on F1, PR-AUC, JSON validity, latency, and responsible-AI checks (today's policy compares F1 only).
+- [x] Enforce data contracts before splitting, quarantine rejected rows without storing raw text, publish quality SLIs in the manifest, and materialize versioned transcript features into an idempotent SQLite offline store ([phase-0f](docs/devlog/phase-0f-dataops-feature-store.md)).
+- [x] Add durable micro-batch ingestion with partition checkpoints, event-id deduplication, atomic commits, and privacy-safe dead-letter metadata; the local JSONL adapter is broker-shaped but is not a deployed Kafka/Spark job ([phase-0g](docs/devlog/phase-0g-streaming.md)).
+- [x] Define and run a fail-closed promotion policy based on F1, PR-AUC, JSON validity, p95 latency, error rate, and Responsible AI checks ([phase-5b](docs/devlog/phase-5b-promotion-policy.md)).
 
 ### Priority 3: CI/CD and quality gates
 
@@ -109,7 +115,7 @@ Every prediction is validated against `src/data/schema.py`:
 
 - [x] Generate real Qwen predictions on CLAIR and report LLM versus XGBoost cross-domain results — **0.803 vs 0.578 F1** ([phase-2b](docs/devlog/phase-2b-llm-crossdomain.md)).
 - [ ] Report per-fraud-type metrics, calibration, and performance under simulated ASR errors (a confusion matrix + failure-mode breakdown already exists in `reports/error_analysis_*.md`).
-- [ ] Add responsible-AI tests for demographic cues, false positives, prompt injection, and unsupported explanations.
+- [x] Add executable Responsible AI regression checks for demographic counterfactual consistency, benign false positives, prompt injection, schema validity, and unsupported evidence spans. CI uses synthetic contract fixtures; real candidate predictions must replace them for an actual release decision ([phase-5b](docs/devlog/phase-5b-promotion-policy.md)).
 - [ ] Build a Gradio demo for transcript and audio inputs backed by the deployed API.
 - [ ] Publish an architecture diagram, API examples, model card, limitations, and a short demonstration video.
 
@@ -125,8 +131,9 @@ macOS / Linux:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-base.txt    # light, cross-platform (Phase 0, 2, 4 unit tests, MLflow, ASR)
-python -m pytest                                  # 93 tests: schema, data, eval, serving, guardrails, ASR, drift, MLflow
+python -m pytest                                  # 106 tests: data/stream/store, eval/RAI, serving, guardrails, ASR, drift, MLflow
 python -m src.data.load --dataset bothbosu --out data/processed   # Phase 0 (writes a manifest.json too)
+python -m src.features.store --data data/processed --store data/features.db
 python -m uvicorn src.serve.app:app --reload      # Phase 4: serve locally
 ```
 
@@ -138,8 +145,33 @@ py -m venv .venv
 python -m pip install -r requirements-base.txt
 python -m pytest
 python -m src.data.load --dataset bothbosu --out data/processed
+python -m src.features.store --data data/processed --store data/features.db
 python -m uvicorn src.serve.app:app --reload
 ```
+
+Each data build also writes `quarantine.jsonl` (fingerprint, reason, and length
+only), `quality_report.json`, and a `data_quality` block in `manifest.json`.
+The feature-store
+command uses the manifest hash as its dataset version, so rerunning the same
+build is an idempotent upsert while a changed dataset remains queryable as a
+separate version. The store is intentionally local/offline; it demonstrates
+SQL data modeling and feature materialization without claiming a deployed
+online feature platform.
+
+For append-only event ingestion, place one `{event_id, occurred_at, source,
+transcript}` JSON object per line in a file and run:
+
+```bash
+python -m src.data.stream \
+  --input data/incoming/call-events.jsonl \
+  --state data/stream_state.db \
+  --partition calls-0
+```
+
+Only derived features and transcript hashes are persisted. Invalid records go
+to a privacy-safe dead-letter table, and the checkpoint advances atomically
+with each micro-batch. The JSONL reader is a local adapter, not a claim that
+Kafka or Spark is deployed.
 
 `requirements-base.txt` now also covers the FastAPI serving layer, guardrails,
 `faster-whisper` ASR, Prometheus metrics, and MLflow tracking — all CPU-only
