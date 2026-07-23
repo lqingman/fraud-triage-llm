@@ -19,6 +19,7 @@ from pathlib import Path
 
 import yaml
 
+from src.data.quality import QualityPolicy, RejectedRow, enforce_quality, validate_pairs
 from src.data.schema import FraudType, FraudVerdict, Risk
 
 SYSTEM_PROMPT = (
@@ -367,6 +368,22 @@ def write_manifest(out_dir: Path, manifest: dict) -> Path:
     return path
 
 
+def write_quarantine(out_dir: Path, rejected: list[RejectedRow]) -> Path:
+    """Persist rejected row metadata without leaking raw transcript content."""
+    path = out_dir / "quarantine.jsonl"
+    with path.open("w", encoding="utf-8") as f:
+        for row in rejected:
+            f.write(json.dumps(row.as_dict(), ensure_ascii=False) + "\n")
+    return path
+
+
+def write_quality_report(out_dir: Path, report: dict) -> Path:
+    """Write diagnostics even when the quality gate subsequently stops the run."""
+    path = out_dir / "quality_report.json"
+    path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return path
+
+
 def main() -> None:
     # Deferred: only main()'s train/val/test re-split needs scikit-learn, and
     # deferring it keeps format_prompt/format_example importable (e.g. by
@@ -387,7 +404,12 @@ def main() -> None:
     val_size = cfg["data"]["val_size"]
     seed = cfg["train"]["seed"]
 
-    pairs = list(LOADERS[args.dataset]())
+    raw_pairs = list(LOADERS[args.dataset]())
+    policy = QualityPolicy.from_config(cfg.get("data", {}).get("quality"))
+    pairs, rejected, quality_report = validate_pairs(raw_pairs, policy)
+    write_quarantine(args.out, rejected)
+    write_quality_report(args.out, quality_report)
+    enforce_quality(quality_report)
     if not pairs:
         raise RuntimeError(f"loader '{args.dataset}' produced no rows")
 
@@ -397,6 +419,7 @@ def main() -> None:
         test_path = args.out / "test.jsonl"
         _write_jsonl(test_path, pairs)
         manifest = build_manifest(args.dataset, {"test": test_path}, {"test": pairs}, cfg)
+        manifest["data_quality"] = quality_report
         write_manifest(args.out, manifest)
         print(
             f"Wrote eval-only test split to {args.out} "
@@ -422,6 +445,7 @@ def main() -> None:
         _write_jsonl(split_files[name], rows)
 
     manifest = build_manifest(args.dataset, split_files, splits, cfg)
+    manifest["data_quality"] = quality_report
     write_manifest(args.out, manifest)
 
     print(f"Wrote splits to {args.out} (dataset={args.dataset}, total={len(pairs)}):")

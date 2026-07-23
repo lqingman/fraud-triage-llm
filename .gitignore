@@ -10,6 +10,7 @@ venv/
 # Data & models (large / not versioned)
 data/raw/
 data/processed/
+data/*.db
 models/
 /qwen7b-fraud-qlora/
 *.joblib

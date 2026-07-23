@@ -35,6 +35,13 @@ data:
   crossdomain_eval: "tasksource/CLAIR_email_fraud"
   test_size: 0.15
   val_size: 0.10
+  quality:
+    # External datasets are validated before splitting. Contract failures stop
+    # the run; duplicates are quarantined and reported but do not fail it.
+    min_transcript_chars: 1
+    max_transcript_chars: 20000
+    max_contract_violation_ratio: 0.01
+    deduplicate: true
 
 asr:
   whisper_model: "base"     # base/small/medium; off-the-shelf
