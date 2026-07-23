@@ -34,3 +34,15 @@ jobs:
             --predictions tests/fixtures/ci_eval/predictions.jsonl \
             --metrics-out /tmp/ci_metrics.json \
             --baseline-out /tmp/ci_baseline.joblib
+      - name: Responsible AI regression gate
+        run: |
+          python -m src.eval.responsible_ai \
+            --cases tests/fixtures/ci_eval/responsible_ai_cases.jsonl \
+            --out /tmp/ci_responsible_ai.json
+      - name: Multi-signal promotion gate
+        run: |
+          python -m src.eval.promotion \
+            --metrics /tmp/ci_metrics.json \
+            --operational-metrics tests/fixtures/ci_eval/operational_metrics.json \
+            --responsible-ai /tmp/ci_responsible_ai.json \
+            --out /tmp/ci_promotion_decision.json

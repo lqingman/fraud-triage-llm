@@ -74,3 +74,13 @@ eval:
   # In production the serving guardrails layer (src/serve/guardrails.py)
   # repairs/retries malformed output before it reaches the user.
   min_json_validity: 0.94
+
+promotion:
+  # A candidate must pass every offline, operational, and responsible-AI
+  # signal. Missing evidence fails closed rather than silently promoting.
+  min_f1: 0.85
+  min_pr_auc: 0.85
+  min_json_validity: 0.94
+  max_p95_latency_ms: 2000
+  max_error_rate: 0.02
+  require_responsible_ai: true
